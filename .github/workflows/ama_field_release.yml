@@ -1,0 +1,204 @@
+name: AMA field release
+
+# Builds ArduPlane with AMA field mode for every board in ama-field/ci/boards.txt.
+# - push a tag ama-field-v<N>: build and publish a GitHub Release for that tag
+# - Run workflow (workflow_dispatch): test build, workflow artifacts only, no release
+# See ama-field/docs/DEVELOPMENT.md, "Release CI".
+
+on:
+  push:
+    tags:
+      - 'ama-field-v*'
+  workflow_dispatch:
+    inputs:
+      boards:
+        description: 'Boards to build, space or comma separated (empty = all of ama-field/ci/boards.txt)'
+        required: false
+        default: ''
+
+concurrency:
+  group: ama-field-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      boards: ${{ steps.matrix.outputs.boards }}
+      version: ${{ steps.version.outputs.version }}
+      fw: ${{ steps.version.outputs.fw }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            ama-field/ci
+            ArduPlane
+            libraries
+            Tools/scripts
+      - name: trim overlays match build_options.py
+        run: python3 ama-field/ci/release_tools.py overlays --check
+      - name: release version
+        id: version
+        shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF_NAME#ama-field-}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+          FW=$(sed -n 's/^#define THISFIRMWARE "ArduPlane V\([^" ]*\).*/\1/p' ArduPlane/version.h)
+          echo "fw=$FW" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+      - name: board batches
+        id: matrix
+        env:
+          INPUT_BOARDS: ${{ inputs.boards }}
+        run: python3 ama-field/ci/release_tools.py matrix --boards "$INPUT_BOARDS"
+
+  build:
+    needs: plan
+    name: build ${{ matrix.batch.id }}
+    runs-on: ubuntu-24.04
+    container: ardupilot/ardupilot-dev-chibios:v0.1.3
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+      - name: Prepare ccache timestamp
+        id: ccache_cache_timestamp
+        run: |
+          NOW=$(date -u +"%F-%T")
+          echo "timestamp=${NOW}" >> $GITHUB_OUTPUT
+      - name: ccache cache files
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: ama-field-ccache-${{ matrix.batch.id }}-${{ steps.ccache_cache_timestamp.outputs.timestamp }}
+          restore-keys: |
+            ama-field-ccache-${{ matrix.batch.id }}-
+            ama-field-ccache-
+      - name: build ${{ matrix.batch.boards }}
+        shell: bash
+        env:
+          BOARDS: ${{ matrix.batch.boards }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          git config --global --add safe.directory '*'
+          # needed for the _with_bl.hex files; not in the container image
+          python3 -m pip install --user --quiet intelhex==2.3.0
+          . .github/workflows/ccache.env
+          ccache -M 1G
+          PATH="/usr/lib/ccache:/opt/gcc-arm-none-eabi-10/bin:$PATH"
+          PATH="/github/home/.local/bin:$PATH"
+          bash ama-field/ci/build_boards.sh "$VERSION" $BOARDS
+          ccache -s
+      - name: batch results
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Batch ${{ matrix.batch.id }}"
+            echo
+            echo "| Board | Status | Build | Flash used (B) | Flash free (B) | Note |"
+            echo "|---|---|---|---|---|---|"
+            for f in ama-field-out/results/*.tsv; do
+              case "$f" in *.removed.tsv) continue ;; esac
+              [ -f "$f" ] || continue
+              IFS=$'\t' read -r b s t u fr files reason < "$f"
+              echo "| $b | $s | $t | $u | $fr | $reason |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ama-field-${{ matrix.batch.id }}
+          path: ama-field-out/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  summary:
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: ama-field/ci
+      - uses: actions/download-artifact@v6
+        continue-on-error: true   # every batch may have died; the report then lists all boards as failed
+        with:
+          pattern: ama-field-b*
+          path: out
+          merge-multiple: true
+      - name: summary, release notes and checksums
+        shell: bash
+        env:
+          BOARDS: ${{ needs.plan.outputs.boards }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          FW: ${{ needs.plan.outputs.fw }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          mkdir -p out/files out/results
+          set +e
+          python3 ama-field/ci/release_tools.py report \
+            --boards "$BOARDS" --results out/results --files out/files \
+            --version "$VERSION" --fw-version "$FW" --tag "$TAG" \
+            --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" \
+            --summary out/summary.md --notes out/release_notes.md
+          rc=$?
+          cat out/summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+      - uses: actions/upload-artifact@v6
+        with:
+          name: AMAFieldMode-${{ needs.plan.outputs.version }}
+          path: |
+            out/files/
+            out/release_notes.md
+            out/summary.md
+          retention-days: 30
+
+  release:
+    needs: [plan, summary]
+    if: ${{ github.ref_type == 'tag' && needs.summary.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: AMAFieldMode-${{ needs.plan.outputs.version }}
+          path: rel
+      - name: create or update the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          TITLE: ArduPlane ${{ needs.plan.outputs.fw }} AMA Field Mode ${{ needs.plan.outputs.version }}
+        run: |
+          set -e
+          R="$GITHUB_REPOSITORY"
+          if gh release view "$TAG" -R "$R" > /dev/null 2>&1; then
+            gh release edit "$TAG" -R "$R" --title "$TITLE" --notes-file rel/release_notes.md
+            # remove files left by an earlier run of this tag that this run did not produce
+            gh release view "$TAG" -R "$R" --json assets -q '.assets[].name' | while read -r a; do
+              if [ ! -f "rel/files/$a" ]; then
+                gh release delete-asset "$TAG" "$a" -R "$R" -y
+              fi
+            done
+          else
+            gh release create "$TAG" -R "$R" --verify-tag --latest \
+              --title "$TITLE" --notes-file rel/release_notes.md
+          fi
+          gh release upload "$TAG" rel/files/* -R "$R" --clobber
+          echo "Release: https://github.com/$R/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

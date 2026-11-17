@@ -1,0 +1,59 @@
+# Boards built by the AMA field mode release workflow
+# (.github/workflows/ama_field_release.yml).
+#
+# One hwdef name per line, exactly as the folder name under
+# libraries/AP_HAL_ChibiOS/hwdef/. Anything after '#' is ignored.
+# Adding or removing a line here is all that is needed; the workflow
+# reads this file on every run.
+#
+# Flash: 1 MB boards (F405) have little spare room in stock 4.7.2. One that
+# doesn't fit stock is rebuilt with trim-tier1.hwdef, then trim-tier2.hwdef
+# (see DEVELOPMENT.md, "Release CI"). If it still doesn't fit, the release
+# goes out without it and lists it "not available".
+
+# Test aircraft's board, the only one flight-tested. Always built exactly
+# from its hwdef (no_trim.txt); known to fit, ~107 KB free.
+FlyingRCF4WingMini
+
+# Matek
+MatekF405-Wing          # 1 MB
+MatekF405-TE            # 1 MB
+MatekF765-Wing
+MatekH743
+MatekH7A3-Wing
+
+# SpeedyBee
+SpeedyBeeF405WING       # 1 MB
+SpeedyBeeF405Mini       # 1 MB
+
+# Holybro
+KakuteF4-Wing           # 1 MB
+KakuteH7-Wing
+Pixhawk6C
+Pixhawk6X
+Durandal
+
+# CubePilot
+CubeOrange
+CubeBlack
+
+# MicoAir
+MicoAir405v2            # 1 MB
+MicoAir405Mini          # 1 MB
+MicoAir743
+MicoAir743v2
+
+# TBS
+TBS_LUCID_H7_WING
+TBS_LUCID_H7_WING_AIO
+
+# Others
+CoreWingF405WingV2      # 1 MB
+HEEWING-F405v2          # 1 MB
+JHEMCUF405WING          # 1 MB
+LongBowF405WING         # 1 MB
+BOTWINGF405             # 1 MB
+BlitzWingH743
+Aocoda-RC-H743Dual
+FoxeerH743v1
+SequreH743

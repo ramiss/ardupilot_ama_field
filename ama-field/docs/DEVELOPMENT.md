@@ -23,10 +23,11 @@ only reads hwdef changes at configure time.
 On 1 MB boards, check the build fits. The custom code is small, but ArduPilot's
 1 MB targets have little spare flash.
 
-The prebuilt release binary is for the **FlyingRC F4Wing Mini** (the test
-aircraft's board). It was built with the xPack `arm-none-eabi-gcc` 10.3.1-2.3
-toolchain. ArduPilot's standard 10-2020-q4-major works the same. Flash use is about
-875 KB of 983 KB.
+Release binaries are built by CI for the boards in `ama-field/ci/boards.txt` (see
+[Release CI](#release-ci)), with ArduPilot's standard 10-2020-q4-major toolchain.
+Releases up to v16 were built by hand for the **FlyingRC F4Wing Mini** only, with
+the xPack `arm-none-eabi-gcc` 10.3.1-2.3 toolchain; either toolchain works. On
+that board flash use is about 875 KB of 983 KB.
 
 ### FlyingRC F4Wing Mini specifics
 
@@ -40,6 +41,126 @@ SERIAL3 in testing):
 
 Set `LOG_BACKEND_TYPE` 0 and reboot to turn logging off. The hwdef also compiles in
 the TOFSense-F I2C rangefinder driver.
+
+---
+
+## Release CI
+
+[`.github/workflows/ama_field_release.yml`](../../.github/workflows/ama_field_release.yml)
+builds ArduPlane for every board in
+[`ama-field/ci/boards.txt`](../ci/boards.txt) and publishes the files on a GitHub
+Release. It runs in ArduPilot's own build container
+(`ardupilot/ardupilot-dev-chibios:v0.1.3`), five boards per job, with ccache.
+
+| Trigger | Result |
+|---|---|
+| Push a tag `ama-field-v<N>` | Builds every board, then creates or updates the release for that tag. |
+| *Actions → AMA field release → Run workflow* | Test build. Files go to the run's artifacts only; no release is made. Optionally enter a board list, for example `FlyingRCF4WingMini MatekF405-Wing`. |
+
+### Adding a board
+
+1. Check that the name is a folder under `libraries/AP_HAL_ChibiOS/hwdef/`. Use
+   the plain flight-controller target, not a `-bdshot`, `-periph`, `-ODID` or
+   `-PPPGW` variant.
+2. Add it on its own line in `ama-field/ci/boards.txt`.
+3. If its first flash needs anything other than "hold BOOT, plug in USB, flash
+   `_with_bl.hex`" (see the board's `README.md` in its hwdef folder), add a line to
+   [`ama-field/ci/board_notes.txt`](../ci/board_notes.txt).
+4. Do a test build of just that board with *Run workflow*.
+
+No workflow edit is needed. An unknown board name stops the run at the first job,
+before anything is built.
+
+### Trimmed builds for 1 MB boards
+
+Every board is first built from its own hwdef, unchanged ("stock"). A 1 MB board
+whose stock build doesn't fit is rebuilt with an overlay passed as
+`./waf configure --board <B> --extra-hwdef=ama-field/ci/trim-tier<N>.hwdef`.
+Tier 1 is tried first, then tier 2. The board's own hwdef files are never edited.
+
+| Tier | Turns off |
+|---|---|
+| 1 | Features AMA field mode can't use: QuadPlane/VTOL (including ship landing and VTOL quicktune), deepstall landing, soaring, internal-combustion engine and EFI, parachute. |
+| 2 | Tier 1, plus peripherals a novice field aircraft rarely has: ADSB, camera, mount/gimbal, gripper, generator, proximity and avoidance, beacon, visual odometry, terrain database and terrain following. |
+
+- **Never trimmed:**
+  - boards with more than 1 MB of flash;
+  - boards listed in [`ama-field/ci/no_trim.txt`](../ci/no_trim.txt). That
+    includes the FlyingRC F4Wing Mini, which must match the flight-tested build.
+- **If tier 2 still doesn't fit,** the board is "not available", and the
+  summary says how many bytes it was over.
+- **Editing the tiers:** the overlays are generated from `TRIM_TIERS` in
+  [`release_tools.py`](../ci/release_tools.py). Change the feature labels there
+  and run `python3 ama-field/ci/release_tools.py overlays`.
+  - Labels are feature labels from `Tools/scripts/build_options.py`. Everything
+    that depends on a label is turned off with it.
+  - The first CI job fails if the committed `.hwdef` files are out of date with
+    this tree.
+- **Safety checks:**
+  - `overlays` refuses to name anything that AMA field mode or a basic setup
+    needs: AUTOLAND, fence, GPS, compass, baro, rangefinder, airspeed, logging,
+    OSD, battery monitoring, RC protocols, MAVLink, bootloader flashing.
+  - After a trimmed build, `probe` reads each feature's effective value from the
+    board's real compile command, for the stock and the trimmed configuration. A
+    board fails if a protected feature went from on to off.
+  - The features that did go from on to off are the board's "removed" list in
+    the release notes.
+  - The only allowed exceptions are the battery-monitor backends that read from
+    an EFI unit or a generator.
+- **No trim needed for core modes:** TAKEOFF, FBWA, FBWB, CRUISE, LOITER, RTL,
+  MANUAL, GUIDED and Plane autotune aren't optional at compile time in 4.7.2, so
+  no overlay can remove them.
+
+### Cutting a release
+
+1. Merge the changes into `ama-field-4.7.2`, and update the version history below.
+2. Optionally, do a full test build with *Run workflow* and an empty board list.
+3. Tag the commit and push the tag:
+
+   ```bash
+   git tag -a ama-field-v17 -m "AMA field mode v17"
+   git push origin ama-field-v17
+   ```
+
+4. Wait for the run to finish (roughly 30–60 minutes), then check the release
+   page.
+
+Files are named `ArduPlane-<fw>_AMAFieldMode_<version>_<Board>.apj` and
+`..._with_bl.hex`, where `<fw>` comes from `ArduPlane/version.h` and `<version>` is
+the tag without `ama-field-`. `SHA256SUMS.txt` covers every file.
+
+To redo a release, move the tag and push it again
+(`git tag -f -a ama-field-v17 ...` then `git push -f origin ama-field-v17`). The
+new run cancels any run still going for that tag, then replaces the release notes
+and files.
+
+### Reading the summary
+
+Open the run in the *Actions* tab. The summary page shows:
+
+- one table per batch (`build b01`, `b02`, ...);
+- a combined table with every board, its status, its build (stock, tier 1 or
+  tier 2), and flash used and free (the `.apj` image size and free flash, the
+  same numbers Mission Planner reports);
+- a collapsible list of the removed features for every trimmed board.
+
+The same table and lists go into the release notes. Each batch artifact also
+has `features/<Board>.txt` (`Tools/scripts/extract_features.py` on the shipped
+build), and `probe/` with the stock and trimmed feature values.
+
+A board that fails is listed as **failed** with a reason, and as "not available"
+in the release. The release still goes out with every other board. Usual
+reasons:
+
+| Reason | Meaning |
+|---|---|
+| `does not fit even with tier 2: N bytes over` | A 1 MB board that is still N bytes too big after tier 2. Making it fit needs a further tier, which is a deliberate decision, not a CI fix. |
+| `does not fit: N bytes over (not trimmed: ...)` | A board that is never trimmed (more than 1 MB, or in `no_trim.txt`) no longer fits. |
+| `tier N fits but the trim check failed` | The trimmed build would remove a protected feature, so it isn't shipped. Read `probe/<Board>.tierN.diff` in the batch artifact. |
+| `build error` | Compile or configure error. Download the batch artifact (`ama-field-b0N`) and read `logs/<Board>.log`. |
+| `build job did not finish` | The whole batch job failed or timed out. Look at that job's log. |
+
+The run fails, and no release is made, only if no board built at all.
 
 ---
 

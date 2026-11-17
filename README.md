@@ -35,6 +35,34 @@ The original ArduPilot README is in [README-ArduPilot.md](README-ArduPilot.md).
 
 ---
 
+## Download firmware
+
+Ready-to-flash firmware for about 30 fixed-wing flight controllers is on the
+**[latest release](https://github.com/ramiss/ardupilot_ama_field/releases/latest)**.
+
+1. **Find your board.** The release notes have a table of every board. File names
+   end in ArduPilot's name for the board, such as `MatekF405-Wing` or `CubeOrange`.
+   It must match your flight controller exactly. If you're not sure of the name,
+   look up your board on ArduPilot's
+   [autopilot hardware list](https://ardupilot.org/plane/docs/common-autopilots.html).
+2. **Pick the file:**
+   - `.apj` if the board already runs ArduPilot. Flash it with Mission Planner:
+     *Install Firmware → Load custom firmware*.
+   - `_with_bl.hex` if it runs INAV or Betaflight. Flash it once over DFU; the
+     release notes explain how.
+3. Your board isn't listed, or is marked "not available"? Build it yourself; see
+   [DEVELOPMENT.md](ama-field/docs/DEVELOPMENT.md#building).
+
+Only the FlyingRC F4Wing Mini has been flight-tested. The other boards compile but
+haven't flown this firmware. Ground-test first, and fly with a MANUAL/FBWA override
+switch.
+
+Some 1 MB boards don't fit the full firmware, so they ship a **trimmed** build with
+less-used features removed, such as QuadPlane, soaring and camera/gimbal support.
+The release notes list exactly what each trimmed board is missing.
+
+---
+
 ## Contents
 
 1. [The field it is designed for](#1-the-field-it-is-designed-for)
@@ -213,9 +241,9 @@ aircraft at ~14 m/s; more for faster aircraft).
 
 ## 7. Getting started
 
-1. **Build or flash firmware** for your board. See
-   [DEVELOPMENT.md](ama-field/docs/DEVELOPMENT.md#building). A prebuilt binary is
-   provided only for the FlyingRC F4Wing Mini.
+1. **Flash the firmware** for your board from the
+   [latest release](#download-firmware), or build it yourself (see
+   [DEVELOPMENT.md](ama-field/docs/DEVELOPMENT.md#building)).
 2. **Set up the aircraft as normal**:
    - calibrations, radio and servo directions;
    - `AIRSPEED_CRUISE`, `AIRSPEED_MIN`, `TRIM_THROTTLE`;
