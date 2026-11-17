@@ -38,7 +38,10 @@ jobs:
           sparse-checkout: |
             ama-field/ci
             ArduPlane
-            libraries/AP_HAL_ChibiOS/hwdef
+            libraries
+            Tools/scripts
+      - name: trim overlays match build_options.py
+        run: python3 ama-field/ci/release_tools.py overlays --check
       - name: release version
         id: version
         shell: bash
@@ -92,6 +95,8 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: |
           git config --global --add safe.directory '*'
+          # needed for the _with_bl.hex files; not in the container image
+          python3 -m pip install --user --quiet intelhex==2.3.0
           . .github/workflows/ccache.env
           ccache -M 1G
           PATH="/usr/lib/ccache:/opt/gcc-arm-none-eabi-10/bin:$PATH"
@@ -105,12 +110,13 @@ jobs:
           {
             echo "### Batch ${{ matrix.batch.id }}"
             echo
-            echo "| Board | Status | Flash used (B) | Flash free (B) | Note |"
-            echo "|---|---|---|---|---|"
+            echo "| Board | Status | Build | Flash used (B) | Flash free (B) | Note |"
+            echo "|---|---|---|---|---|---|"
             for f in ama-field-out/results/*.tsv; do
+              case "$f" in *.removed.tsv) continue ;; esac
               [ -f "$f" ] || continue
-              IFS=$'\t' read -r b s u fr files reason < "$f"
-              echo "| $b | $s | $u | $fr | $reason |"
+              IFS=$'\t' read -r b s t u fr files reason < "$f"
+              echo "| $b | $s | $t | $u | $fr | $reason |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v6
