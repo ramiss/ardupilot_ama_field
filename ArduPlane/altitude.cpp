@@ -747,6 +747,23 @@ void Plane::rangefinder_height_update(void)
         }
     }
 
+    // custom: reject readings that disagree badly with the baro height.
+    // Some ToF sensors (MT-06) report random "good" 2-5m readings when the
+    // ground is beyond their real range. Gate = 2.5m + 20% of baro height.
+    if (range_ok && ahrs.home_is_set()) {
+        const float baro_hgt = (flight_stage == AP_FixedWing::FlightStage::LAND) ?
+            height_above_target() :
+            (adjusted_altitude_cm() - ahrs.get_home().alt) * 0.01f;
+        // a strong return (signal quality >= 50%, MT-06 strength >= 128) is
+        // always the real ground: never seen above 15m. Trust it even when
+        // the baro is off by more than the gate (baro reads 2-4m low near
+        // the ground at landing speed on this airframe)
+        const bool strong = rangefinder.signal_quality_pct_orient(orientation) >= 50;
+        if (!strong && fabsf(corrected_distance - baro_hgt) > 2.5f + 0.2f * fabsf(baro_hgt)) {
+            range_ok = false;
+        }
+    }
+
     if (range_ok && ahrs.home_is_set()) {
         if (!rangefinder_state.have_initial_reading) {
             rangefinder_state.have_initial_reading = true;
