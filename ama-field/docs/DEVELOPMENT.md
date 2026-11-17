@@ -23,10 +23,11 @@ only reads hwdef changes at configure time.
 On 1 MB boards, check the build fits. The custom code is small, but ArduPilot's
 1 MB targets have little spare flash.
 
-The prebuilt release binary is for the **FlyingRC F4Wing Mini** (the test
-aircraft's board). It was built with the xPack `arm-none-eabi-gcc` 10.3.1-2.3
-toolchain. ArduPilot's standard 10-2020-q4-major works the same. Flash use is about
-875 KB of 983 KB.
+Release binaries are built by CI for the boards in `ama-field/ci/boards.txt` (see
+[Release CI](#release-ci)), with ArduPilot's standard 10-2020-q4-major toolchain.
+Releases up to v16 were built by hand for the **FlyingRC F4Wing Mini** only, with
+the xPack `arm-none-eabi-gcc` 10.3.1-2.3 toolchain; either toolchain works. On
+that board flash use is about 875 KB of 983 KB.
 
 ### FlyingRC F4Wing Mini specifics
 
@@ -40,6 +41,79 @@ SERIAL3 in testing):
 
 Set `LOG_BACKEND_TYPE` 0 and reboot to turn logging off. The hwdef also compiles in
 the TOFSense-F I2C rangefinder driver.
+
+---
+
+## Release CI
+
+[`.github/workflows/ama_field_release.yml`](../../.github/workflows/ama_field_release.yml)
+builds ArduPlane for every board in
+[`ama-field/ci/boards.txt`](../ci/boards.txt) and publishes the files on a GitHub
+Release. It runs in ArduPilot's own build container
+(`ardupilot/ardupilot-dev-chibios:v0.1.3`), five boards per job, with ccache.
+
+| Trigger | Result |
+|---|---|
+| Push a tag `ama-field-v<N>` | Builds every board, then creates or updates the release for that tag. |
+| *Actions → AMA field release → Run workflow* | Test build. Files go to the run's artifacts only; no release is made. Optionally enter a board list, for example `FlyingRCF4WingMini MatekF405-Wing`. |
+
+### Adding a board
+
+1. Check that the name is a folder under `libraries/AP_HAL_ChibiOS/hwdef/`. Use
+   the plain flight-controller target, not a `-bdshot`, `-periph`, `-ODID` or
+   `-PPPGW` variant.
+2. Add it on its own line in `ama-field/ci/boards.txt`.
+3. If its first flash needs anything other than "hold BOOT, plug in USB, flash
+   `_with_bl.hex`" (see the board's `README.md` in its hwdef folder), add a line to
+   [`ama-field/ci/board_notes.txt`](../ci/board_notes.txt).
+4. Do a test build of just that board with *Run workflow*.
+
+No workflow edit is needed. An unknown board name stops the run at the first job,
+before anything is built.
+
+### Cutting a release
+
+1. Merge the changes into `ama-field-4.7.2`, and update the version history below.
+2. Optionally, do a full test build with *Run workflow* and an empty board list.
+3. Tag the commit and push the tag:
+
+   ```bash
+   git tag -a ama-field-v17 -m "AMA field mode v17"
+   git push origin ama-field-v17
+   ```
+
+4. Wait for the run to finish (roughly 30–60 minutes), then check the release
+   page.
+
+Files are named `ArduPlane-<fw>_AMAFieldMode_<version>_<Board>.apj` and
+`..._with_bl.hex`, where `<fw>` comes from `ArduPlane/version.h` and `<version>` is
+the tag without `ama-field-`. `SHA256SUMS.txt` covers every file.
+
+To redo a release, move the tag and push it again
+(`git tag -f -a ama-field-v17 ...` then `git push -f origin ama-field-v17`). The
+new run cancels any run still going for that tag, then replaces the release notes
+and files.
+
+### Reading the summary
+
+Open the run in the *Actions* tab. The summary page shows:
+
+- one table per batch (`build b01`, `b02`, ...);
+- a combined table with every board, its status, and flash used and free.
+
+The same combined table goes into the release notes.
+
+A board that fails is listed as **failed** with a reason, and as "not available"
+in the release. The release still goes out with every other board. Usual
+reasons:
+
+| Reason | Meaning |
+|---|---|
+| `does not fit: region 'flash' overflowed by N bytes` | The firmware is N bytes too big for the board. Expected on some 1 MB F405 boards. Making it fit means removing features in that board's hwdef, which is a deliberate decision, not a CI fix. |
+| `build error` | Compile or configure error. Download the batch artifact (`ama-field-b0N`) and read `logs/<Board>.log`. |
+| `build job did not finish` | The whole batch job failed or timed out. Look at that job's log. |
+
+The run fails, and no release is made, only if no board built at all.
 
 ---
 
