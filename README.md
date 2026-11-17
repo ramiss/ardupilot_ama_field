@@ -57,6 +57,10 @@ Only the FlyingRC F4Wing Mini has been flight-tested. The other boards compile b
 haven't flown this firmware. Ground-test first, and fly with a MANUAL/FBWA override
 switch.
 
+Some 1 MB boards don't fit the full firmware, so they ship a **trimmed** build with
+less-used features removed, such as QuadPlane, soaring and camera/gimbal support.
+The release notes list exactly what each trimmed board is missing.
+
 ---
 
 ## Contents

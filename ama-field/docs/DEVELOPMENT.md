@@ -71,6 +71,46 @@ Release. It runs in ArduPilot's own build container
 No workflow edit is needed. An unknown board name stops the run at the first job,
 before anything is built.
 
+### Trimmed builds for 1 MB boards
+
+Every board is first built from its own hwdef, unchanged ("stock"). A 1 MB board
+whose stock build doesn't fit is rebuilt with an overlay passed as
+`./waf configure --board <B> --extra-hwdef=ama-field/ci/trim-tier<N>.hwdef`.
+Tier 1 is tried first, then tier 2. The board's own hwdef files are never edited.
+
+| Tier | Turns off |
+|---|---|
+| 1 | Features AMA field mode can't use: QuadPlane/VTOL (including ship landing and VTOL quicktune), deepstall landing, soaring, internal-combustion engine and EFI, parachute. |
+| 2 | Tier 1, plus peripherals a novice field aircraft rarely has: ADSB, camera, mount/gimbal, gripper, generator, proximity and avoidance, beacon, visual odometry, terrain database and terrain following. |
+
+- **Never trimmed:**
+  - boards with more than 1 MB of flash;
+  - boards listed in [`ama-field/ci/no_trim.txt`](../ci/no_trim.txt). That
+    includes the FlyingRC F4Wing Mini, which must match the flight-tested build.
+- **If tier 2 still doesn't fit,** the board is "not available", and the
+  summary says how many bytes it was over.
+- **Editing the tiers:** the overlays are generated from `TRIM_TIERS` in
+  [`release_tools.py`](../ci/release_tools.py). Change the feature labels there
+  and run `python3 ama-field/ci/release_tools.py overlays`.
+  - Labels are feature labels from `Tools/scripts/build_options.py`. Everything
+    that depends on a label is turned off with it.
+  - The first CI job fails if the committed `.hwdef` files are out of date with
+    this tree.
+- **Safety checks:**
+  - `overlays` refuses to name anything that AMA field mode or a basic setup
+    needs: AUTOLAND, fence, GPS, compass, baro, rangefinder, airspeed, logging,
+    OSD, battery monitoring, RC protocols, MAVLink, bootloader flashing.
+  - After a trimmed build, `probe` reads each feature's effective value from the
+    board's real compile command, for the stock and the trimmed configuration. A
+    board fails if a protected feature went from on to off.
+  - The features that did go from on to off are the board's "removed" list in
+    the release notes.
+  - The only allowed exceptions are the battery-monitor backends that read from
+    an EFI unit or a generator.
+- **No trim needed for core modes:** TAKEOFF, FBWA, FBWB, CRUISE, LOITER, RTL,
+  MANUAL, GUIDED and Plane autotune aren't optional at compile time in 4.7.2, so
+  no overlay can remove them.
+
 ### Cutting a release
 
 1. Merge the changes into `ama-field-4.7.2`, and update the version history below.
@@ -99,9 +139,14 @@ and files.
 Open the run in the *Actions* tab. The summary page shows:
 
 - one table per batch (`build b01`, `b02`, ...);
-- a combined table with every board, its status, and flash used and free.
+- a combined table with every board, its status, its build (stock, tier 1 or
+  tier 2), and flash used and free (the `.apj` image size and free flash, the
+  same numbers Mission Planner reports);
+- a collapsible list of the removed features for every trimmed board.
 
-The same combined table goes into the release notes.
+The same table and lists go into the release notes. Each batch artifact also
+has `features/<Board>.txt` (`Tools/scripts/extract_features.py` on the shipped
+build), and `probe/` with the stock and trimmed feature values.
 
 A board that fails is listed as **failed** with a reason, and as "not available"
 in the release. The release still goes out with every other board. Usual
@@ -109,7 +154,9 @@ reasons:
 
 | Reason | Meaning |
 |---|---|
-| `does not fit: region 'flash' overflowed by N bytes` | The firmware is N bytes too big for the board. Expected on some 1 MB F405 boards. Making it fit means removing features in that board's hwdef, which is a deliberate decision, not a CI fix. |
+| `does not fit even with tier 2: N bytes over` | A 1 MB board that is still N bytes too big after tier 2. Making it fit needs a further tier, which is a deliberate decision, not a CI fix. |
+| `does not fit: N bytes over (not trimmed: ...)` | A board that is never trimmed (more than 1 MB, or in `no_trim.txt`) no longer fits. |
+| `tier N fits but the trim check failed` | The trimmed build would remove a protected feature, so it isn't shipped. Read `probe/<Board>.tierN.diff` in the batch artifact. |
 | `build error` | Compile or configure error. Download the batch artifact (`ama-field-b0N`) and read `logs/<Board>.log`. |
 | `build job did not finish` | The whole batch job failed or timed out. Look at that job's log. |
 
