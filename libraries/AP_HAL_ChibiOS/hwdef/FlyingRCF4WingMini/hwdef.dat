@@ -94,7 +94,8 @@ IMU BMI270 SPI:bmi270 ROTATION_NONE
 define HAL_DEFAULT_INS_FAST_SAMPLE 1
 
 
-define HAL_LOGGING_ENABLED 0  # No onboard logging device
+define HAL_LOGGING_ENABLED 1  # custom: re-enabled for MAVLink (serial) logging to an external logger
+define HAL_LOGGING_BACKENDS_DEFAULT 0  # custom: logging off until LOG_BACKEND_TYPE is set (2 = MAVLink)
 
 # ----------------- I2C compass & Baro -----------------
 # no built-in compass, but probe the i2c bus for all possible
@@ -128,3 +129,7 @@ define HAL_RUNCAM_ENABLED 0
 define HAL_BUTTON_ENABLED 0
 define AP_NOTIFY_OREOLED_ENABLED 0
 
+
+# --------------------- custom addition ----------------------
+# enable Nooploop TOFSense-F I2C protocol rangefinder (RNGFNDx_TYPE=40), used by MicoAir MT-06 in IIC_NOOPLOOP mode
+define AP_RANGEFINDER_TOFSENSEF_I2C_ENABLED 1
