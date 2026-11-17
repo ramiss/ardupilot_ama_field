@@ -40,6 +40,13 @@ private:
     uint32_t distance_mm;
     bool new_distance; // true if we have a new distance
 
+    // raw sample for logging (RFSS)
+    uint32_t raw_mm;
+    uint16_t raw_strength;
+    uint16_t raw_status;
+    bool new_raw;
+    int8_t raw_quality = -1;   // signal strength as 0-100%
+
     // get a reading
     bool start_reading(void);
     bool get_reading(uint32_t &reading_mm, uint16_t &signal_strength, uint16_t &status);

@@ -21,6 +21,7 @@
 #define TOFSENSEP_I2C_COMMAND_SIGNAL_STATUS 0x28
 
 #include <utility>
+#include <AP_Logger/AP_Logger.h>
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_HAL/utility/sparse-endian.h>
@@ -133,9 +134,14 @@ void AP_RangeFinder_TOFSenseF_I2C::timer(void)
 
     if (get_reading(dist_mm, signal_strength, status)) {
         WITH_SEMAPHORE(_sem);
+        raw_mm = dist_mm;
+        raw_strength = signal_strength;
+        raw_status = status;
+        new_raw = true;
         if (status == 1) {
             // healthy data
             distance_mm = dist_mm;
+            raw_quality = (signal_strength >= 255) ? 100 : (signal_strength * 100U) / 255U;
             new_distance = true;
             state.last_reading_ms = AP_HAL::millis();
         }
@@ -146,8 +152,22 @@ void AP_RangeFinder_TOFSenseF_I2C::timer(void)
 void AP_RangeFinder_TOFSenseF_I2C::update(void)
 {
     WITH_SEMAPHORE(_sem);
+#if HAL_LOGGING_ENABLED
+    if (new_raw) {
+        new_raw = false;
+        // @LoggerMessage: RFSS
+        // @Description: TOFSense-F raw sample
+        // @Field: TimeUS: Time since system startup
+        // @Field: D: raw distance
+        // @Field: Str: signal strength
+        // @Field: St: sensor status (1 = valid)
+        AP::logger().WriteStreaming("RFSS", "TimeUS,D,Str,St", "sm--", "F0--", "QfHH",
+                                    AP_HAL::micros64(), raw_mm * 0.001f, raw_strength, raw_status);
+    }
+#endif
     if (new_distance) {
         state.distance_m = distance_mm * 0.001f;
+        state.signal_quality_pct = raw_quality;
         new_distance = false;
         update_status();
     } else if (AP_HAL::millis() - state.last_reading_ms > 300) {
