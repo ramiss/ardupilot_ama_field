@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" width="1000" height="660" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15">
+  <title>AMA field mode: field layout, takeoff and runway circle</title>
+  <defs>
+    <pattern id="hatch" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="12" height="12" fill="#fdecea"/>
+      <line x1="0" y1="0" x2="0" y2="12" stroke="#f3b4ae" stroke-width="4"/>
+    </pattern>
+    <marker id="aBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1a73e8"/></marker>
+    <marker id="aGray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/></marker>
+    <marker id="aDim" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#202124"/></marker>
+  </defs>
+
+  <rect width="1000" height="660" fill="#f3f8ee"/>
+  <!-- fence (centred on HOME in the pits) -->
+  <circle cx="500" cy="560" r="556" fill="none" stroke="#8430ce" stroke-width="2.5" stroke-dasharray="10 7"/>
+  <text x="18" y="118" fill="#8430ce" font-weight="600">fence</text>
+  <text x="18" y="136" fill="#8430ce" font-size="12">FENCE_RADIUS</text>
+
+  <!-- no-fly zone behind the flight line -->
+  <rect x="0" y="392" width="1000" height="268" fill="url(#hatch)"/>
+  <line x1="0" y1="392" x2="1000" y2="392" stroke="#d93025" stroke-width="3" stroke-dasharray="14 8"/>
+  <text x="16" y="414" fill="#b3261e" font-weight="700">FLIGHT LINE</text>
+  <text x="16" y="433" fill="#b3261e" font-size="13">no flying on the pilot side of this line</text>
+
+  <!-- runway -->
+  <rect x="230" y="350" width="600" height="40" rx="3" fill="#b9bdc3"/>
+  <line x1="236" y1="370" x2="824" y2="370" stroke="#ffffff" stroke-width="2" stroke-dasharray="16 12"/>
+  <text x="822" y="386" fill="#ffffff" font-size="12" text-anchor="end">runway</text>
+
+  <!-- pits -->
+  <rect x="420" y="480" width="230" height="110" rx="6" fill="#e8eaed" stroke="#9aa0a6"/>
+  <text x="535" y="575" fill="#3c4043" text-anchor="middle" font-weight="600">pits / pilots</text>
+  <path d="M470,505 l5.9,12 13.2,1.9 -9.6,9.3 2.3,13.1 -11.8,-6.2 -11.8,6.2 2.3,-13.1 -9.6,-9.3 13.2,-1.9 z" fill="#f9ab00" stroke="#b06000"/>
+  <text x="496" y="522" fill="#3c4043" font-size="13">first good GPS fix</text>
+  <text x="496" y="539" fill="#3c4043" font-size="13">= pits reference (arming waits for it)</text>
+
+  <!-- taxi path -->
+  <path d="M600,480 C600,430 420,430 345,372" fill="none" stroke="#5f6368" stroke-width="2.2" stroke-dasharray="3 6" marker-end="url(#aGray)"/>
+  <text x="610" y="455" fill="#5f6368" font-size="13">1  arm, taxi out, line up, stop</text>
+
+  <!-- abeam guide -->
+  <line x1="330" y1="370" x2="330" y2="215" stroke="#1a73e8" stroke-width="1" stroke-dasharray="2 4"/>
+
+  <!-- runway circle -->
+  <circle cx="330" cy="215" r="95" fill="#e8f0fe" fill-opacity="0.6" stroke="#1a73e8" stroke-width="2.5" stroke-dasharray="9 6"/>
+  <path d="M235,215 A95,95 0 0 1 250,163" fill="none" stroke="#1a73e8" stroke-width="2.5" marker-end="url(#aBlue)"/>
+  <path d="M425,215 A95,95 0 0 1 410,267" fill="none" stroke="#1a73e8" stroke-width="2.5" marker-end="url(#aBlue)"/>
+  <circle cx="330" cy="215" r="3" fill="#1a73e8"/>
+  <text x="372" y="58" fill="#1a73e8" text-anchor="middle" font-weight="700">runway circle</text>
+  <text x="372" y="77" fill="#1a73e8" text-anchor="middle" font-size="13">TAKEOFF loiter · RTL point · fence return</text>
+  <text x="372" y="95" fill="#1a73e8" text-anchor="middle" font-size="13">abeam the roll start, radius sized for wind</text>
+
+  <!-- gap dimension -->
+  <line x1="455" y1="312" x2="455" y2="368" stroke="#202124" stroke-width="1.3" marker-start="url(#aDim)" marker-end="url(#aDim)"/>
+  <line x1="430" y1="310" x2="462" y2="310" stroke="#202124" stroke-width="1"/>
+  <text x="466" y="337" fill="#202124" font-size="13">AUTOLAND_SIDEGAP + 10 m</text>
+  <text x="466" y="353" fill="#202124" font-size="13">from the centreline</text>
+
+  <!-- roll start -->
+  <circle cx="330" cy="370" r="8" fill="#202124" stroke="#ffffff" stroke-width="2"/>
+  <text x="120" y="318" fill="#202124" font-size="13" font-weight="600">roll start (saved)</text>
+  <text x="120" y="335" fill="#202124" font-size="13">= touchdown reference</text>
+  <line x1="250" y1="330" x2="322" y2="364" stroke="#202124" stroke-width="1"/>
+
+  <!-- takeoff roll & climb-out -->
+  <line x1="340" y1="370" x2="905" y2="370" stroke="#1a73e8" stroke-width="4" marker-end="url(#aBlue)"/>
+  <text x="560" y="412" fill="#0b57d0" font-size="13">2  TAKEOFF: tail held down, steers the line-up heading,</text>
+  <text x="560" y="429" fill="#0b57d0" font-size="13">climb-out tracks the runway line (crosswind can't drift it)</text>
+  <!-- crosswind arrows -->
+  <line x1="740" y1="300" x2="740" y2="340" stroke="#80868b" stroke-width="2" marker-end="url(#aGray)"/>
+  <line x1="790" y1="300" x2="790" y2="340" stroke="#80868b" stroke-width="2" marker-end="url(#aGray)"/>
+  <text x="765" y="292" fill="#80868b" font-size="12" text-anchor="middle">crosswind</text>
+
+  <!-- turn back to circle -->
+  <path d="M905,370 C985,370 985,170 860,150 C700,125 520,118 375,130" fill="none" stroke="#1a73e8" stroke-width="2.5" marker-end="url(#aBlue)"/>
+  <text x="690" y="88" fill="#0b57d0" font-size="13" text-anchor="middle">3  at TKOFF_ALT: loiter on the runway circle,</text>
+  <text x="690" y="105" fill="#0b57d0" font-size="13" text-anchor="middle">always on the side away from the pits</text>
+
+  <!-- direction -->
+  <line x1="850" y1="24" x2="980" y2="24" stroke="#202124" stroke-width="2.5" marker-end="url(#aDim)"/>
+  <text x="980" y="46" fill="#202124" font-size="13" text-anchor="end">takeoff &amp; landing direction</text>
+</svg>

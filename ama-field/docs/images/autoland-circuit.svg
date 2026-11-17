@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15">
+  <title>AMA field mode: AUTOLAND circuit, top view</title>
+  <defs>
+    <pattern id="hatch2" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="12" height="12" fill="#fdecea"/>
+      <line x1="0" y1="0" x2="0" y2="12" stroke="#f3b4ae" stroke-width="4"/>
+    </pattern>
+    <marker id="bGray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5f6368"/></marker>
+    <marker id="bOrange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#e8710a"/></marker>
+    <marker id="bGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#188038"/></marker>
+    <marker id="bDim" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#202124"/></marker>
+  </defs>
+
+  <rect width="1000" height="640" fill="#f3f8ee"/>
+
+  <!-- no-fly zone -->
+  <rect x="0" y="392" width="1000" height="248" fill="url(#hatch2)"/>
+  <line x1="0" y1="392" x2="1000" y2="392" stroke="#d93025" stroke-width="3" stroke-dasharray="14 8"/>
+  <text x="16" y="414" fill="#b3261e" font-weight="700">FLIGHT LINE</text>
+
+  <!-- runway -->
+  <rect x="300" y="350" width="640" height="40" rx="3" fill="#b9bdc3"/>
+  <line x1="40" y1="370" x2="990" y2="370" stroke="#ffffff" stroke-width="2" stroke-dasharray="16 12"/>
+  <text x="932" y="386" fill="#ffffff" font-size="12" text-anchor="end">runway</text>
+
+  <!-- pits -->
+  <rect x="620" y="470" width="220" height="100" rx="6" fill="#e8eaed" stroke="#9aa0a6"/>
+  <text x="730" y="525" fill="#3c4043" text-anchor="middle" font-weight="600">pits / pilots</text>
+
+  <!-- base circle: centre x=330, near edge 25 px above centreline -->
+  <circle cx="330" cy="235" r="110" fill="#fef7e0" fill-opacity="0.7" stroke="#9aa0a6" stroke-width="1" stroke-dasharray="4 4"/>
+  <circle cx="330" cy="235" r="3" fill="#5f6368"/>
+
+  <!-- 1 transit + level part of circle -->
+  <path d="M930,95 L380,125" fill="none" stroke="#5f6368" stroke-width="3.5"/>
+  <path d="M380,125 A110,110 0 0 0 220,235" fill="none" stroke="#5f6368" stroke-width="3.5" marker-end="url(#bGray)"/>
+  <!-- 2 descent arc: last 90 deg -->
+  <path d="M220,235 A110,110 0 0 0 330,345" fill="none" stroke="#e8710a" stroke-width="5" marker-end="url(#bOrange)"/>
+  <!-- 3 final -->
+  <path d="M330,345 C380,345 410,370 470,370 L640,370" fill="none" stroke="#e8710a" stroke-width="5"/>
+  <!-- flare segment -->
+  <line x1="600" y1="370" x2="640" y2="370" stroke="#c5221f" stroke-width="6"/>
+  <!-- 4 rollout -->
+  <line x1="660" y1="370" x2="860" y2="370" stroke="#188038" stroke-width="5" marker-end="url(#bGreen)"/>
+
+  <!-- entry -->
+  <g transform="translate(940,94) rotate(183)">
+    <path d="M-14,0 L12,0 M0,-12 L2,12 M-12,-5 L-12,5" stroke="#202124" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+  <text x="975" y="70" fill="#202124" text-anchor="end" font-weight="700">AUTOLAND switch</text>
+  <text x="975" y="130" fill="#3c4043" text-anchor="end" font-size="13">1  level at the selected height</text>
+  <text x="975" y="147" fill="#3c4043" text-anchor="end" font-size="13">(min AUTOLAND_WP_ALT, max 0.25 × WP_DIST)</text>
+
+  <!-- labels on circle -->
+  <text x="330" y="58" fill="#3c4043" font-size="13" text-anchor="middle">base circle: centred AUTOLAND_WP_DIST behind the aim point,</text>
+  <text x="330" y="75" fill="#3c4043" font-size="13" text-anchor="middle">radius sized for speed + wind (≤ 60 m), on the side away from the pits</text>
+  <text x="38" y="270" fill="#c25600" font-weight="700">2  descent starts</text>
+  <text x="38" y="289" fill="#c25600" font-size="13">AUTOLAND_DSC_ARC degrees</text>
+  <text x="38" y="305" fill="#c25600" font-size="13">before lined up (90° shown)</text>
+
+  <!-- SIDEGAP dimension -->
+  <line x1="300" y1="347" x2="300" y2="368" stroke="#202124" stroke-width="1.2" marker-start="url(#bDim)" marker-end="url(#bDim)"/>
+  <text x="292" y="364" fill="#202124" font-size="12" text-anchor="end">AUTOLAND_SIDEGAP</text>
+
+  <!-- final label + WP_DIST dimension -->
+  <text x="470" y="340" fill="#c25600" font-weight="700">3  final</text>
+  <line x1="330" y1="430" x2="640" y2="430" stroke="#202124" stroke-width="1.2" marker-start="url(#bDim)" marker-end="url(#bDim)"/>
+  <line x1="330" y1="420" x2="330" y2="440" stroke="#202124"/>
+  <line x1="640" y1="378" x2="640" y2="440" stroke="#202124"/>
+  <text x="485" y="452" fill="#202124" font-size="13" text-anchor="middle">AUTOLAND_WP_DIST</text>
+
+  <!-- aim point and roll start -->
+  <path d="M640,383 l-8,-14 h16 z" fill="#c5221f"/>
+  <circle cx="700" cy="370" r="8" fill="#202124" stroke="#ffffff" stroke-width="2"/>
+  <line x1="640" y1="300" x2="640" y2="345" stroke="#202124" stroke-width="1"/>
+  <line x1="700" y1="300" x2="700" y2="360" stroke="#202124" stroke-width="1"/>
+  <line x1="640" y1="306" x2="700" y2="306" stroke="#202124" stroke-width="1.2" marker-start="url(#bDim)" marker-end="url(#bDim)"/>
+  <text x="670" y="296" fill="#202124" font-size="12" text-anchor="middle">AUTOLAND_TD_OFS</text>
+  <text x="632" y="410" fill="#c5221f" font-size="13" text-anchor="end">touchdown aim ▼</text>
+  <text x="706" y="410" fill="#202124" font-size="13">● roll start</text>
+
+  <!-- flare + rollout labels -->
+  <text x="600" y="258" fill="#c5221f" font-size="13" text-anchor="end">flare: rudder lines the nose up</text>
+  <text x="600" y="275" fill="#c5221f" font-size="13" text-anchor="end">with the runway (no crab)</text>
+  <line x1="600" y1="280" x2="618" y2="364" stroke="#c5221f" stroke-width="1"/>
+  <text x="770" y="318" fill="#188038" font-weight="700">4  rollout</text>
+  <text x="770" y="336" fill="#188038" font-size="12">steering × AUTOLAND_RO_GAIN</text>
+</svg>

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 480" width="1000" height="480" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15">
+  <title>AMA field mode: AUTOLAND height profile</title>
+  <defs>
+    <marker id="cDim" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#202124"/></marker>
+    <marker id="cGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#188038"/></marker>
+  </defs>
+  <rect width="1000" height="480" fill="#ffffff"/>
+  <rect x="0" y="400" width="1000" height="80" fill="#e6efdc"/>
+  <line x1="0" y1="400" x2="1000" y2="400" stroke="#5f6368" stroke-width="2"/>
+
+  <!-- phase bands -->
+  <rect x="420" y="40" width="160" height="360" fill="#fef7e0"/>
+  <text x="200" y="32" fill="#5f6368" font-size="13" text-anchor="middle">transit · downwind · base (on the circle)</text>
+  <text x="500" y="32" fill="#c25600" font-size="13" text-anchor="middle">final turn</text>
+  <text x="700" y="32" fill="#c25600" font-size="13" text-anchor="middle">final</text>
+  <text x="905" y="32" fill="#188038" font-size="13" text-anchor="middle">rollout</text>
+
+  <!-- trees -->
+  <g fill="#7cb342" stroke="#558b2f">
+    <path d="M110,400 l22,-90 22,90 z"/><path d="M150,400 l26,-110 26,110 z"/><path d="M200,400 l20,-80 20,80 z"/>
+    <path d="M240,400 l24,-100 24,100 z"/><path d="M290,400 l18,-70 18,70 z"/>
+  </g>
+  <text x="200" y="283" fill="#33691e" font-size="12" text-anchor="middle" font-weight="600">obstacles</text>
+
+  <!-- reference lines -->
+  <line x1="40" y1="250" x2="760" y2="250" stroke="#d93025" stroke-width="1.5" stroke-dasharray="8 6"/>
+  <text x="44" y="268" fill="#b3261e" font-size="13">AUTOLAND_WP_ALT — minimum circuit height</text>
+  <line x1="40" y1="120" x2="760" y2="120" stroke="#1a73e8" stroke-width="1.5" stroke-dasharray="8 6"/>
+  <text x="44" y="112" fill="#0b57d0" font-size="13">0.25 × AUTOLAND_WP_DIST — circuit height cap</text>
+
+  <!-- DSC_ARC = 0 comparison -->
+  <path d="M420,170 L580,170 L800,400" fill="none" stroke="#9aa0a6" stroke-width="2.5" stroke-dasharray="6 5"/>
+  <text x="640" y="200" fill="#80868b" font-size="12">AUTOLAND_DSC_ARC = 0:</text>
+  <text x="640" y="215" fill="#80868b" font-size="12">level until lined up, steeper final</text>
+
+  <!-- main path -->
+  <path d="M40,170 L420,170" fill="none" stroke="#5f6368" stroke-width="4"/>
+  <path d="M420,170 C520,196 640,262 760,352 C784,370 800,382 830,392 C845,397 855,399 868,400" fill="none" stroke="#e8710a" stroke-width="4.5"/>
+  <path d="M760,352 C784,370 800,382 830,392 C845,397 855,399 868,400" fill="none" stroke="#c5221f" stroke-width="5"/>
+  <line x1="868" y1="400" x2="975" y2="400" stroke="#188038" stroke-width="5" marker-end="url(#cGreen)"/>
+
+  <!-- annotations -->
+  <text x="60" y="160" fill="#3c4043" font-size="13">held level at the height AUTOLAND was selected</text>
+  <circle cx="420" cy="170" r="5" fill="#e8710a"/>
+  <text x="428" y="140" fill="#c25600" font-size="13" font-weight="700">descent starts</text>
+  <text x="428" y="156" fill="#c25600" font-size="12">AUTOLAND_DSC_ARC before lined up</text>
+  <text x="700" y="262" fill="#c25600" font-size="13">one continuous glide over</text>
+  <text x="700" y="278" fill="#c25600" font-size="13">the rest of the turn + final</text>
+  <text x="808" y="300" fill="#c5221f" font-size="13" font-weight="700">flare</text>
+  <text x="808" y="316" fill="#c5221f" font-size="12">LAND_FLARE_SEC / _ALT</text>
+  <text x="808" y="331" fill="#c5221f" font-size="12">sink → TECS_LAND_SINK</text>
+  <text x="808" y="346" fill="#c5221f" font-size="12">nose ≥ LAND_PITCH_DEG</text>
+
+  <!-- aim / touchdown / roll start -->
+  <path d="M820,412 l-7,-12 h14 z" fill="#c5221f"/>
+  <circle cx="880" cy="400" r="7" fill="#202124" stroke="#ffffff" stroke-width="2"/>
+  <line x1="820" y1="416" x2="880" y2="416" stroke="#202124" stroke-width="1.2" marker-start="url(#cDim)" marker-end="url(#cDim)"/>
+  <text x="850" y="433" fill="#202124" font-size="12" text-anchor="middle">AUTOLAND_TD_OFS</text>
+  <text x="815" y="451" fill="#c5221f" font-size="12" text-anchor="end">aim ▼</text>
+  <text x="886" y="451" fill="#202124" font-size="12">● roll start</text>
+  <text x="992" y="472" fill="#188038" font-size="12" text-anchor="end">rollout: steering × AUTOLAND_RO_GAIN</text>
+</svg>

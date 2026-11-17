@@ -1,0 +1,54 @@
+# AMA field mode - core settings (airframe independent)
+#
+# Load AFTER your airframe is calibrated, autotuned and flying well in FBWA.
+# Mission Planner: Config > Full Parameter List > Load from file, then Write Params.
+# These switch on the AMA field mode behaviour and set conservative starting
+# values. Every line marked "FIELD" or "AIRFRAME" must be checked for your site
+# and aircraft - see ama-field/docs/TUNING.md, section 2.
+#
+# --- enable AMA field mode (bit 1 land at roll start + bit 2 circuit away from pits) ---
+AUTOLAND_OPTIONS,6
+# FIELD: lowest height you accept on the circuit (obstacles + margin), metres
+AUTOLAND_WP_ALT,20
+# FIELD/AIRFRAME: length of the final, metres (~6-8 s at landing speed; 80-150 m typical)
+AUTOLAND_WP_DIST,100
+# FIELD: gap between the extended centreline and the base circle, metres
+AUTOLAND_SIDEGAP,5
+# AIRFRAME: aim this far short of the roll start; start at 0, then set to the overrun you measure
+AUTOLAND_TD_OFS,0
+# AIRFRAME: start the descent this many degrees before lined up on final (0 = level until lined up)
+AUTOLAND_DSC_ARC,90
+# AIRFRAME: rollout steering multiplier; start at 1, raise if it swings off as it slows
+AUTOLAND_RO_GAIN,1
+AUTOLAND_DIR_OFF,0
+AUTOLAND_CLIMB,0
+#
+# --- runway circle is the RTL point; no rally points ---
+RTL_AUTOLAND,0
+RALLY_TOTAL,0
+#
+# --- fence: bounce back from FBWB/FBWA/CRUISE, return to the runway circle ---
+FENCE_ENABLE,1
+# circle + maximum altitude
+FENCE_TYPE,3
+# 6 = Guided (required for the bounce-back)
+FENCE_ACTION,6
+# required: 0 = return to the runway circle, not a rally point
+FENCE_RET_RALLY,0
+# FIELD: radius around HOME and ceiling, metres - keep the whole circuit inside with margin
+FENCE_RADIUS,300
+FENCE_ALT_MAX,120
+#
+# --- FBWB as the everyday mode: altitude hold with a floor ---
+# FIELD: FBWB/CRUISE won't descend below this (land with AUTOLAND, FBWA or MANUAL)
+CRUISE_ALT_FLOOR,20
+#
+# --- landing basics (refine per airframe, TUNING.md section 5) ---
+LAND_FLARE_SEC,1.5
+LAND_FLARE_ALT,2
+LAND_DISARMDELAY,20
+TECS_LAND_SINK,0.5
+#
+# --- rangefinder (optional). Leave as is with no rangefinder fitted. ---
+# With a downward rangefinder fitted and configured, set RNGFND_LANDING 1.
+RNGFND_LANDING,0

@@ -1,0 +1,95 @@
+# EXAMPLE ONLY - Freewing Pandora (1.2 m foam high-wing taildragger, 3S, no airspeed
+# sensor) with a MicoAir MT-06 rangefinder and an ESP32 MAVLink logger. These are the
+# values that worked on that one test aircraft at that one field (2026-11-16).
+# They are a worked example of an AMA field mode setup, not defaults for your plane:
+# start from ../ama_field_core.param and see ama-field/docs/TUNING.md.
+# Contains no calibration values.
+#
+# --- custom runway-circuit features (AUTOLAND_OPTIONS bits 1+2) ---
+AUTOLAND_OPTIONS,6
+AUTOLAND_WP_ALT,20
+AUTOLAND_WP_DIST,85
+AUTOLAND_SIDEGAP,5
+AUTOLAND_TD_OFS,25
+AUTOLAND_DSC_ARC,90
+AUTOLAND_RO_GAIN,3
+AUTOLAND_DIR_OFF,0
+AUTOLAND_CLIMB,0
+#
+# --- takeoff (taildragger: tail held down with up elevator) ---
+TKOFF_ALT,50
+TKOFF_DIST,120
+TKOFF_LVL_ALT,10
+TKOFF_LVL_PITCH,15
+TKOFF_GND_PITCH,11
+TKOFF_ROTATE_SPD,10
+TKOFF_TDRAG_ELEV,60
+TKOFF_TDRAG_SPD1,9
+TKOFF_THR_SLEW,20
+GROUND_STEER_ALT,5
+STEER2SRV_P,6
+STEER2SRV_I,0
+STEER2SRV_IMAX,800
+STEER2SRV_MINSPD,3
+STEER2SRV_TCONST,0.5
+LEVEL_ROLL_LIMIT,10
+#
+# --- navigation ---
+NAVL1_PERIOD,13
+NAVL1_DAMPING,0.85
+WP_LOITER_RAD,30
+RTL_ALTITUDE,60
+RTL_AUTOLAND,0
+RALLY_TOTAL,0
+#
+# --- landing ---
+LAND_FLARE_ALT,2
+LAND_FLARE_SEC,1
+LAND_PITCH_DEG,8
+LAND_PF_ALT,6
+LAND_DISARMDELAY,20
+TECS_LAND_SINK,0.6
+TECS_LAND_ARSPD,15
+TECS_LAND_PMAX,10
+TECS_SINK_MAX,5
+RNGFND_LANDING,1
+#
+# --- speed / height control ---
+AIRSPEED_CRUISE,14
+AIRSPEED_MIN,10
+AIRSPEED_MAX,22
+TRIM_THROTTLE,50
+TECS_PITCH_MAX,20
+FBWB_CLIMB_RATE,5
+CRUISE_ALT_FLOOR,20
+AHRS_WIND_MAX,7
+# 1090 = 1024 (mid throttle = TRIM_THROTTLE) + 64 (no gain boost at low speed in auto takeoff) + 2 (mid throttle = cruise airspeed in CRUISE/FBWB)
+FLIGHT_OPTIONS,1090
+#
+# --- fence (bounce-back needs FENCE_ACTION 6 and FENCE_RET_RALLY 0) ---
+FENCE_ENABLE,1
+FENCE_TYPE,3
+FENCE_ACTION,6
+FENCE_RADIUS,240
+FENCE_ALT_MAX,100
+FENCE_OPTIONS,0
+FENCE_RET_RALLY,0
+#
+# --- MicoAir MT-06 rangefinder (I2C, IIC_NOOPLOOP mode, ID 0) ---
+RNGFND1_TYPE,40
+RNGFND1_ADDR,8
+RNGFND1_ORIENT,25
+RNGFND1_MIN,0.05
+RNGFND1_MAX,6
+RNGFND1_GNDCLR,0.11
+#
+# --- MAVLink logging to the ESP32 logger on SERIAL3 (DJI port) ---
+# set LOG_BACKEND_TYPE 0 (and reboot) to turn logging off
+LOG_BACKEND_TYPE,2
+LOG_BITMASK,27446
+LOG_MAV_RATEMAX,10
+LOG_DISARMED,0
+EK3_LOG_LEVEL,1
+SERIAL3_PROTOCOL,2
+SERIAL3_BAUD,115
+ARMING_SKIPCHK,1024
