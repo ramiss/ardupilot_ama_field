@@ -542,6 +542,7 @@ protected:
 private:
 
     // Switch to QRTL if enabled and within radius
+    uint32_t circle_refresh_ms;
     bool switch_QRTL();
 };
 
@@ -964,6 +965,8 @@ protected:
 
     bool takeoff_mode_setup;
     Location start_loc;
+    bool runway_circle_set;        // loiter moved to the AUTOLAND runway circle
+    uint32_t circle_refresh_ms;
 
     bool _enter() override;
 
@@ -1012,14 +1015,21 @@ public:
     AP_Int16 landing_dir_off;
     AP_Int8  options;
     AP_Int16 terrain_alt_min;
+    AP_Int16 side_gap;
+    AP_Int16 td_offset;
+    AP_Int16 desc_arc;
+    AP_Float rollout_gain;
 
     // Bitfields of AUTOLAND_OPTIONS
     enum class AutoLandOption {
         AUTOLAND_DIR_ON_ARM     = (1U << 0), // set dir for autoland on arm if compass in use.
+        LAND_AT_ROLL_START      = (1U << 1), // land at the takeoff roll start point, direction from roll start to liftoff point
+        CIRCUIT_AWAY_FROM_HOME  = (1U << 2), // build the approach circuit on the side of the runway away from HOME
     };
 
     enum class AutoLandStage {
         CLIMB,
+        TRANSIT,   // runway options: fly to the base circle holding altitude
         LOITER,
         LANDING
     };
@@ -1027,6 +1037,37 @@ public:
     bool autoland_option_is_set(AutoLandOption option) const {
         return (options & int8_t(option)) != 0;
     }
+    // custom runway behaviour (takeoff point landing, pits-side circuit, runway circle, fence turn-back)
+    bool runway_options_enabled() const {
+        return autoland_option_is_set(AutoLandOption::LAND_AT_ROLL_START) &&
+               autoland_option_is_set(AutoLandOption::CIRCUIT_AWAY_FROM_HOME);
+    }
+
+    // centre of the "runway circle" used by TAKEOFF loiter and RTL (no rally point):
+    // abeam the captured takeoff point, WP_LOITER_RAD + 5m to the side away from HOME.
+    // Altitude is left at the takeoff point's ground altitude; callers set it.
+    bool get_runway_loiter_center(Location &loc) const;
+    // re-centre a loiter waypoint that was set from get_runway_loiter_center()
+    // (wind estimate improves after takeoff). Returns true if wp was updated.
+    bool refresh_runway_circle(Location &wp) const;
+    // radius the aircraft will really fly for a commanded loiter radius (wind, roll limit)
+    float flown_circle_radius(float commanded_m, float extra_speed = 0) const;
+
+    // pits side of a line: -1 left, +1 right, 0 unknown (pits = first good GPS fix point since power-up)
+    int8_t pits_side(const Location &line_pt, float heading_deg) const;
+    bool has_gps_fix_point() const { return gps_fix_loc_valid; }
+    bool has_flown_this_arming() const { return flown_this_arming; }
+    float get_rollout_gain() const { return rollout_gain; }
+    // true once the wheels are on the ground (rangefinder < 0.4m for 0.3s, or not flying)
+    bool wheels_on_ground();
+
+    // TAKEOFF pre-check: false (with a CRITICAL message) if the pits side is unknown
+    bool takeoff_pits_check(void);
+
+    // hold the approach-start altitude between leaving the base circle and
+    // joining the glide slope
+    void update_target_altitude() override;
+    float final_turn_remaining_deg() const;
 
 protected:
     bool _enter() override;
@@ -1034,8 +1075,25 @@ protected:
     AP_Mission::Mission_Command cmd_loiter;
     AP_Mission::Mission_Command cmd_land;
     Location land_start;
+    float approach_hgt;           // height of the circuit / start of final above the touchdown point
     AutoLandStage stage;
     void set_autoland_direction(const float heading);
+
+    // LAND_AT_ROLL_START support
+    void check_roll_start_capture(void);
+    Location roll_start_loc;      // last stationary position before the takeoff roll
+    float roll_start_yaw_deg;     // compass heading while lined up at the roll start
+    mutable Location last_circle; // last runway circle centre handed out
+    mutable bool last_circle_valid = false;
+    bool roll_start_valid = false;
+    Location land_point;          // landing target captured at liftoff
+    bool land_point_valid = false;
+    bool roll_capture_rejected = false; // capture refused for this arming (curved/too long roll)
+    void update_gps_fix_point(void);
+    Location gps_fix_loc;          // first good GPS fix point since boot (normally the pits)
+    bool gps_fix_loc_valid = false;
+    bool flown_this_arming = false;
+    uint32_t rf_ground_ms;
 };
 #endif
 #if HAL_SOARING_ENABLED

@@ -62,8 +62,30 @@ ModeTakeoff::ModeTakeoff() :
 
 bool ModeTakeoff::_enter()
 {
+#if MODE_AUTOLAND_ENABLED
+    // AUTOLAND_OPTIONS bits 1+2: refuse a ground takeoff if we can't tell which side the pits are
+    if (!plane.mode_autoland.takeoff_pits_check()) {
+        return false;
+    }
+    // only one auto takeoff per arming: refuse another ground takeoff after
+    // this arming has already flown (e.g. switch left in TAKEOFF after landing)
+    if (plane.mode_autoland.runway_options_enabled() &&
+        plane.mode_autoland.has_flown_this_arming() && !plane.is_flying()) {
+        gcs().send_text(MAV_SEVERITY_CRITICAL, "Takeoff blocked: disarm and re-arm first");
+        return false;
+    }
+#endif
+    // start the takeoff with no wound-up steering or attitude integrators
+    // (they can build up while taxiing / lining up and leave the rudder hard over)
+    plane.steerController.reset_I();
+    plane.yawController.reset_I();
+    plane.rollController.reset_I();
+    plane.pitchController.reset_I();
+    plane.steer_state.locked_course = false;
+    plane.steer_state.locked_course_err = 0;
     takeoff_mode_setup = false;
     have_autoenabled_fences = false;
+    runway_circle_set = false;
 
     return true;
 }
@@ -174,6 +196,30 @@ void ModeTakeoff::update()
         plane.set_flight_stage(AP_FixedWing::FlightStage::NORMAL);
     }
 
+#if MODE_AUTOLAND_ENABLED
+    // once the straight climb-out is finished, loiter on the runway circle
+    // (abeam the takeoff point, away from HOME) instead of TKOFF_DIST down the runway
+    if (takeoff_mode_setup && !runway_circle_set &&
+        plane.flight_stage != AP_FixedWing::FlightStage::TAKEOFF) {
+        Location circle;
+        if (plane.mode_autoland.get_runway_loiter_center(circle)) {
+            circle.set_alt_cm(plane.next_WP_loc.alt, plane.next_WP_loc.get_alt_frame());
+            plane.prev_WP_loc = plane.current_loc;
+            plane.next_WP_loc = circle;
+            gcs().send_text(MAV_SEVERITY_INFO, "Takeoff: loiter abeam takeoff point");
+        }
+        // only try once per entry to TAKEOFF
+        runway_circle_set = true;
+    } else if (runway_circle_set && plane.flight_stage != AP_FixedWing::FlightStage::TAKEOFF) {
+        // move the circle out as the wind estimate settles
+        const uint32_t now = AP_HAL::millis();
+        if (now - circle_refresh_ms > 3000) {
+            circle_refresh_ms = now;
+            plane.mode_autoland.refresh_runway_circle(plane.next_WP_loc);
+        }
+    }
+#endif
+
     if (plane.flight_stage == AP_FixedWing::FlightStage::TAKEOFF) {
         //below TKOFF_ALT
         plane.takeoff_calc_roll();
@@ -200,6 +246,18 @@ void ModeTakeoff::update()
 
 void ModeTakeoff::navigate()
 {
+#if MODE_AUTOLAND_ENABLED
+    // runway options: once airborne, hold the runway line itself (cross-track
+    // correction) during the climb-out instead of just pointing at the
+    // TKOFF_DIST point, so a crosswind can't drift the aircraft over the pits
+    if (takeoff_mode_setup && !runway_circle_set &&
+        plane.flight_stage == AP_FixedWing::FlightStage::TAKEOFF &&
+        plane.mode_autoland.runway_options_enabled() &&
+        (plane.current_loc.alt - start_loc.alt) > 100) {
+        plane.nav_controller->update_waypoint(start_loc, plane.next_WP_loc);
+        return;
+    }
+#endif
     // Zero indicates to use WP_LOITER_RAD
     plane.update_loiter(0);
 }

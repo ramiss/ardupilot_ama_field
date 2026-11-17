@@ -85,6 +85,14 @@ bool AP_Arming_Plane::pre_arm_checks(bool display_failure)
         ret = false;
     }
 
+#if MODE_AUTOLAND_ENABLED
+    // AUTOLAND_OPTIONS bits 1+2 need the pits reference (first good GPS fix point)
+    if (plane.mode_autoland.runway_options_enabled() && !plane.mode_autoland.has_gps_fix_point()) {
+        check_failed(display_failure, "Autoland: no GPS fix point yet");
+        ret = false;
+    }
+#endif
+
     if (plane.aparm.pitch_limit_min > -3) {
         check_failed(display_failure, "PTCH_LIM_MIN_DEG too large (%.1f)", plane.aparm.pitch_limit_min.get());
         ret = false;

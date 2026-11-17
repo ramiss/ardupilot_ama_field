@@ -576,7 +576,25 @@ int16_t Plane::calc_nav_yaw_course(void)
     // holding a specific navigation course on the ground. Used in
     // auto-takeoff and landing
     int32_t bearing_error_cd = nav_controller->bearing_error_cd();
+#if MODE_AUTOLAND_ENABLED
+    if (control_mode == &mode_autoland && landing.is_flaring() &&
+        mode_autoland.runway_options_enabled() &&
+        takeoff_state.initial_direction.initialized) {
+        // in the flare, point the nose down the runway (kick out the
+        // crosswind crab) instead of steering the ground track: touching
+        // down crabbed side-loads the gear and ground-loops a taildragger
+        bearing_error_cd = wrap_180_cd(int32_t(takeoff_state.initial_direction.heading * 100) - ahrs.yaw_sensor);
+    }
+#endif
     int16_t steering = steerController.get_steering_out_angle_error(bearing_error_cd);
+#if MODE_AUTOLAND_ENABLED
+    if (control_mode == &mode_autoland && landing.is_flaring() &&
+        mode_autoland.runway_options_enabled() && mode_autoland.wheels_on_ground()) {
+        // on the ground after an AUTOLAND touchdown: extra steering authority
+        // to hold the runway heading until stopped
+        steering = constrain_float(steering * mode_autoland.get_rollout_gain(), -4500, 4500);
+    }
+#endif
     if (stick_mixing_enabled()) {
         steering = channel_rudder->stick_mixing(steering);
     }

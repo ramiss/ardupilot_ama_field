@@ -56,6 +56,33 @@ void Plane::fence_check()
         }
     }
 
+#if MODE_AUTOLAND_ENABLED
+    /*
+      AUTOLAND_OPTIONS bits 1+2 with FENCE_ACTION Guided: if the breach
+      happened in CRUISE, FBWB or FBWA, hand control back to that mode once
+      the aircraft is back inside the fence and heading toward the runway
+      circle ("bounce off the fence").
+     */
+    if (armed && fence.enabled() &&
+        control_mode == &mode_guided &&
+        control_mode_reason == ModeReason::FENCE_BREACHED &&
+        (previous_mode == &mode_cruise || previous_mode == &mode_fbwb || previous_mode == &mode_fbwa) &&
+        mode_autoland.runway_options_enabled() &&
+        fence.get_breaches() == 0) {
+        const Vector2f gs = ahrs.groundspeed_vector();
+        if (gs.length() > 5.0f) {
+            const float course_deg = wrap_360(degrees(gs.angle()));
+            const float bearing_deg = degrees(current_loc.get_bearing(next_WP_loc));
+            if (fabsf(wrap_180(bearing_deg - course_deg)) < 20.0f) {
+                Mode &resume = *previous_mode;
+                if (set_mode(resume, ModeReason::FENCE_RETURN_PREVIOUS_MODE)) {
+                    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Fence: turned back, %s resumed", resume.name());
+                }
+            }
+        }
+    }
+#endif
+
     if (!fence.enabled()) {
         // Switch back to the chosen control mode if still in
         // GUIDED to the return point
@@ -178,6 +205,17 @@ void Plane::fence_check()
                 }
             }
 
+#if MODE_AUTOLAND_ENABLED
+            {
+                // AUTOLAND_OPTIONS bits 1+2: head back toward the runway circle
+                // rather than the fence return point or HOME (the pits)
+                Location circle;
+                if (fence.get_return_rally() == 0 && mode_autoland.get_runway_loiter_center(circle)) {
+                    circle.set_alt_cm(loc.alt, loc.get_alt_frame());
+                    loc = circle;
+                }
+            }
+#endif
             setup_terrain_target_alt(loc);
             set_guided_WP(loc);
 

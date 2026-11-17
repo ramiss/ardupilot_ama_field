@@ -358,6 +358,22 @@ void Plane::do_RTL(int32_t rtl_altitude_AMSL_cm)
 
 Location Plane::calc_best_rally_or_home_location(const Location &_current_loc, float rtl_home_alt_amsl_cm) const
 {
+#if MODE_AUTOLAND_ENABLED
+    // with AUTOLAND_OPTIONS bits 1+2 and no usable rally point, return to the
+    // runway circle (abeam the takeoff point, away from HOME) instead of HOME
+    {
+        bool have_rally = false;
+#if HAL_RALLY_ENABLED
+        RallyLocation ral_loc;
+        have_rally = plane.rally.find_nearest_rally_point(_current_loc, ral_loc);
+#endif
+        Location circle;
+        if (!have_rally && plane.mode_autoland.get_runway_loiter_center(circle)) {
+            circle.set_alt_cm(int32_t(rtl_home_alt_amsl_cm), Location::AltFrame::ABSOLUTE);
+            return circle;
+        }
+    }
+#endif
 #if HAL_RALLY_ENABLED
     return plane.rally.calc_best_rally_or_home_location(_current_loc, rtl_home_alt_amsl_cm);
 #else

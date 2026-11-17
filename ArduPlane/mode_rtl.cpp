@@ -95,6 +95,17 @@ void ModeRTL::navigate()
     }
 #endif
 
+#if MODE_AUTOLAND_ENABLED
+    // runway circle used as the RTL point: re-centre as the wind estimate changes
+    {
+        const uint32_t now = AP_HAL::millis();
+        if (now - circle_refresh_ms > 3000) {
+            circle_refresh_ms = now;
+            plane.mode_autoland.refresh_runway_circle(plane.next_WP_loc);
+        }
+    }
+#endif
+
     uint16_t radius = abs(plane.g.rtl_radius);
     if (radius > 0) {
         plane.loiter.direction = (plane.g.rtl_radius < 0) ? -1 : 1;
