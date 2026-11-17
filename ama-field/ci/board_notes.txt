@@ -1,0 +1,12 @@
+# Optional per-board flashing notes for the release notes.
+# Format: <hwdef name> <note text>. Boards not listed get the generic
+# instructions (hold the boot button while plugging in USB, flash
+# _with_bl.hex over DFU). Taken from each board's README.md in
+# libraries/AP_HAL_ChibiOS/hwdef/<board>/.
+
+CoreWingF405WingV2 No boot button on the board: pull the BOOT0 pin on the USB extender connector low while plugging in USB (or hold BOOT on the wireless USB extender), then use STM32CubeProgrammer.
+Pixhawk6C Ships with a bootloader Mission Planner can use: flash the .apj; the _with_bl.hex is not needed.
+Pixhawk6X Ships with a bootloader Mission Planner can use: flash the .apj; the _with_bl.hex is not needed.
+Durandal Ships with a bootloader Mission Planner can use: flash the .apj; the _with_bl.hex is not needed.
+CubeOrange Ships with a bootloader Mission Planner can use: flash the .apj; the _with_bl.hex is not needed.
+CubeBlack Ships with a bootloader Mission Planner can use: flash the .apj; the _with_bl.hex is not needed.
