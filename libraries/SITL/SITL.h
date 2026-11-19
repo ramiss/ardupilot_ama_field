@@ -209,6 +209,7 @@ public:
     AP_Float sonar_noise; // in metres
     AP_Float sonar_scale; // meters per volt
     AP_Int8 sonar_rot;  // from rotations enumeration
+    AP_Float sonar_strong; // SITL rangefinder: strong signal below this distance, 0 = no signal quality
 
     AP_Float drift_speed; // degrees/second/minute
     AP_Float drift_time;  // period in minutes
@@ -284,6 +285,8 @@ public:
         AP_Float wcof_yn;
         AP_Float wcof_zp;
         AP_Float wcof_zn;
+
+        AP_Float thst;   // Pa at full throttle
     };
     BaroParm baro[BARO_MAX_INSTANCES];
 

@@ -21,6 +21,8 @@
 #define MODE_AUTOLAND_ENABLED 1
 #endif
 
+#include <AP_Baro/AP_Baro_config.h>
+
 #include <AP_Quicktune/AP_Quicktune.h>
 
 class AC_PosControl;
@@ -1019,6 +1021,15 @@ public:
     AP_Int16 td_offset;
     AP_Int16 desc_arc;
     AP_Float rollout_gain;
+    AP_Int8  td_learn;
+#if AP_BARO_THST_COMP_ENABLED
+    AP_Int8  baro_learn;
+
+    // AUTOLAND_BAROLRN: called every loop
+    void baro_learn_update(void);
+    // TAKEOFF entered on the ground: measure the baro thrust error on this run-up
+    void baro_learn_takeoff_start(void);
+#endif
 
     // Bitfields of AUTOLAND_OPTIONS
     enum class AutoLandOption {
@@ -1094,6 +1105,78 @@ protected:
     bool gps_fix_loc_valid = false;
     bool flown_this_arming = false;
     uint32_t rf_ground_ms;
+
+#if AP_BARO_THST_COMP_ENABLED
+    // AUTOLAND_BAROLRN: BARO1_THST_SCALE from the stationary part of the takeoff run-up
+    enum class BaroLearnState : uint8_t {
+        IDLE,       // armed, parked: keep a baseline of the last second
+        WAIT,       // TAKEOFF selected on the ground, waiting for the throttle to rise
+        SAMPLING,   // throttle rising, still stationary
+        DONE,       // finished for this arming
+    };
+    enum class BaroLearnResult : uint8_t {
+        ACCEPTED = 0,
+        TOO_SHORT = 1,
+        TOO_NOISY = 2,
+        OUT_OF_RANGE = 3,
+        NO_BASELINE = 4,
+    };
+    static constexpr uint8_t BARO_LEARN_BASE_LEN = 20;   // 1 s at 20 Hz
+    struct {
+        BaroLearnState state;
+        float base[BARO_LEARN_BASE_LEN];   // raw BARO1 pressure while parked, Pa
+        uint8_t base_n;
+        uint8_t base_idx;
+        float baseline;
+        float base_sd;
+        uint32_t last_ms;
+        uint32_t start_ms;
+        uint32_t end_ms;
+        uint16_t n;
+        float sum_tp;       // sum of throttle x pressure rise, throttle >= 0.25
+        float sum_tt;       // sum of throttle squared, throttle >= 0.25
+        uint16_t n_fit;
+        float thr_min;
+        float thr_max;
+        float accel_fwd;    // filtered forward acceleration, m/s/s
+        bool save_pending;  // learned value to save at disarm
+    } baro_lrn;
+    void baro_learn_finish(void);
+#endif
+
+    // AUTOLAND_TDLRN: AUTOLAND_TD_OFS from where each landing touches down
+    enum class TdLearnState : uint8_t {
+        IDLE,       // not landing at the roll start, or learning off
+        WATCH,      // AUTOLAND aimed at the roll start: waiting for the touchdown
+        TOUCHED,    // touchdown seen: checking it stays down
+        DONE,       // finished for this landing
+    };
+    enum class TdLearnResult : uint8_t {
+        ACCEPTED = 0,
+        PILOT_INPUT = 1,
+        OFF_LINE = 2,
+        OUT_OF_RANGE = 3,
+        MODE_CHANGE = 4,
+        NOT_SEEN = 5,
+    };
+    struct {
+        TdLearnState state;
+        bool pilot_input;       // stick input on the final, flare or rollout
+        bool save_pending;      // learned value to save at disarm
+        uint8_t source;         // touchdown seen by 0 the accelerometer, 1 the rangefinder
+        int16_t aim_ofs;        // AUTOLAND_TD_OFS this landing was aimed with
+        bool still_loc_pending; // record where the sink next stops
+        uint32_t touch_ms;
+        uint32_t sink_ms;       // last time sinking faster than 0.3 m/s (or climbing)
+        uint32_t spike_ms;      // first impact on the accelerometer since then, 0 = none
+        float spike_accel;
+        float accel;            // vertical acceleration above 1 g at the touchdown, m/s/s
+        Location touch_loc;
+        Location spike_loc;
+        Location still_loc;     // where the sink stopped
+    } td_lrn;
+    void td_learn_update(void);
+    void td_learn_finish(TdLearnResult res);
 };
 #endif
 #if HAL_SOARING_ENABLED

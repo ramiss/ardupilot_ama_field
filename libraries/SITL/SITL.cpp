@@ -613,6 +613,13 @@ const AP_Param::GroupInfo SIM::var_info3[] = {
     // @User: Advanced
     AP_GROUPINFO("UART_LOSS", 42, SIM,  uart_byte_loss_pct, 0),
 
+    // @Param: SONAR_STRONG
+    // @DisplayName: SITL rangefinder strong-signal distance
+    // @Description: SITL rangefinder (RNGFND1_TYPE 100) reports a signal quality: 100% below this distance, 20% above it, like a small ToF sensor outdoors. With SIM_SONAR_GLITCH, glitched samples read a random 2-5m with 20% quality. 0 = no signal quality reported (stock).
+    // @Units: m
+    // @User: Advanced
+    AP_GROUPINFO("SONAR_STRONG", 45, SIM,  sonar_strong, 0),
+
     // @Group: ARSPD_
     // @Path: ./SITL_Airspeed.cpp
     AP_SUBGROUPINFO(airspeed[0], "ARSPD_", 50, SIM, AirspeedParm),

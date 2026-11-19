@@ -45,6 +45,7 @@ private:
     uint16_t raw_strength;
     uint16_t raw_status;
     bool new_raw;
+    uint32_t last_rfss_ms;
     int8_t raw_quality = -1;   // signal strength as 0-100%
 
     // get a reading

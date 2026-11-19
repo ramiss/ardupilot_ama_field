@@ -219,6 +219,8 @@ private:
 
 #if AP_RANGEFINDER_ENABLED
     AP_FixedWing::Rangefinder_State rangefinder_state;
+    // consecutive new samples with a strong signal (rangefinder_height_update)
+    uint8_t rangefinder_strong_count;
 
     /*
       orientation of rangefinder to use for landing

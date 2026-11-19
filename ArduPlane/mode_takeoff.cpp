@@ -74,6 +74,10 @@ bool ModeTakeoff::_enter()
         gcs().send_text(MAV_SEVERITY_CRITICAL, "Takeoff blocked: disarm and re-arm first");
         return false;
     }
+#if AP_BARO_THST_COMP_ENABLED
+    // measure the baro thrust error on the stationary part of the run-up
+    plane.mode_autoland.baro_learn_takeoff_start();
+#endif
 #endif
     // start the takeoff with no wound-up steering or attitude integrators
     // (they can build up while taxiing / lining up and leave the rudder hard over)

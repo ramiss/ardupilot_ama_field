@@ -77,6 +77,13 @@ public:
 #if (HAL_BARO_WIND_COMP_ENABLED || AP_BARO_THST_COMP_ENABLED)
     float get_corrected_pressure(uint8_t instance) const { return sensors[instance].corrected_pressure; }
 #endif
+#if AP_BARO_THST_COMP_ENABLED
+    // BARO1_THST_SCALE, for a vehicle that measures it in flight
+    AP_Float &get_thrust_scale(void) { return sensors[0].mot_scale; }
+    // forward motor throttle 0..1 used for thrust compensation on a plane
+    // without VTOL motors (only defined for ArduPlane)
+    float get_forward_throttle(void) const;
+#endif
 
     // temperature in degrees C
     float get_temperature(void) const { return get_temperature(_primary); }

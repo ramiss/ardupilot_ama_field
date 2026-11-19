@@ -8,6 +8,17 @@
 // This should be larger than the expected steady state error.
 constexpr float fast_climb_extra_alt = 10;
 
+// AUTOLAND_TD_OFS default: about the float after the flare, so an untrained
+// aircraft lands near the roll start rather than far down the runway. Test
+// aircraft (Freewing Pandora): 36-48m with the baro uncompensated; SITL with the
+// baro compensated: 25-28m. Split the difference: a little short or long, not a
+// lot long. AUTOLAND_TDLRN refines it from there.
+#if AP_BARO_THST_COMP_ENABLED && HAL_BARO_WIND_COMP_ENABLED
+#define AUTOLAND_TD_OFS_DEFAULT 20
+#else
+#define AUTOLAND_TD_OFS_DEFAULT 30
+#endif
+
 /*
   mode AutoLand parameters
  */
@@ -66,12 +77,12 @@ const AP_Param::GroupInfo ModeAutoLand::var_info[] = {
 
     // @Param: TD_OFS
     // @DisplayName: Touchdown target offset
-    // @Description: With AUTOLAND_OPTIONS bit 1, aim the landing this far before (short of) the takeoff roll start point, to allow for the float in the flare so the wheels touch down near the roll start. Negative moves the aim point further down the runway. The whole landing circuit moves with it.
+    // @Description: Aim the landing this far short of the roll start to absorb the float after the flare (and any baro error left). Needs AUTOLAND_OPTIONS bit 1. Negative moves the aim point further down the runway. The whole landing circuit moves with it. Learned on each landing by AUTOLAND_TDLRN. The default is 20m (30m on a board built without baro compensation), a typical float, so an untrained aircraft lands near the roll start; 0 aims at the roll start itself.
     // @Range: -50 100
     // @Increment: 1
     // @Units: m
     // @User: Standard
-    AP_GROUPINFO("TD_OFS", 7, ModeAutoLand, td_offset, 0),
+    AP_GROUPINFO("TD_OFS", 7, ModeAutoLand, td_offset, AUTOLAND_TD_OFS_DEFAULT),
 
     // @Param: DSC_ARC
     // @DisplayName: Descent start on the final turn
@@ -90,6 +101,21 @@ const AP_Param::GroupInfo ModeAutoLand::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("RO_GAIN", 9, ModeAutoLand, rollout_gain, 1.0f),
 
+#if AP_BARO_THST_COMP_ENABLED
+    // @Param: BAROLRN
+    // @DisplayName: Learn baro thrust compensation on takeoff
+    // @Description: With AUTOLAND_OPTIONS bits 1+2, every TAKEOFF started on the ground measures how far the baro pressure rises with throttle while the aircraft still stands still, and updates BARO1_THST_SCALE: the first measurement is taken as is if BARO1_THST_SCALE is 0, after that each takeoff moves it half way to the new measurement. The new value is used straight away and saved at disarm. Needs TKOFF_THR_SLEW low enough for about 1 s of run-up before the aircraft rolls.
+    // @Values: 0:Off,1:Learn on each takeoff
+    // @User: Standard
+    AP_GROUPINFO("BAROLRN", 10, ModeAutoLand, baro_learn, 1),
+#endif
+
+    // @Param: TDLRN
+    // @DisplayName: Learn the touchdown offset on landing
+    // @Description: With AUTOLAND_OPTIONS bit 1, every AUTOLAND that touches down measures how far past its aim point it touched down (the float), and updates AUTOLAND_TD_OFS so the next landing touches down at the roll start: each landing moves it half way to the new measurement (the first measurement is taken as is if AUTOLAND_TD_OFS is 0), limited to 0-50m. The touchdown is the rangefinder reading on the ground or, without one, where the GPS-aided sink rate stops for good (at the wheel impact on the accelerometer if there is one); a bounce waits for the next contact. Not learned if the pilot moves the sticks or changes mode between the start of the final and 2 s after the touchdown, or if the touchdown is more than 15m off the runway line. Saved at disarm.
+    // @Values: 0:Off,1:Learn on each landing
+    // @User: Standard
+    AP_GROUPINFO("TDLRN", 11, ModeAutoLand, td_learn, 1),
 
     AP_GROUPEND
 };
@@ -141,6 +167,12 @@ bool ModeAutoLand::_enter()
         // aim short of the roll start by AUTOLAND_TD_OFS to allow for the flare float
         home.offset_bearing(plane.takeoff_state.initial_direction.heading, -float(td_offset.get()));
     }
+    // AUTOLAND_TDLRN: measure where this landing touches down
+    td_lrn.state = (use_roll_start && td_learn > 0) ? TdLearnState::WATCH : TdLearnState::IDLE;
+    td_lrn.aim_ofs = td_offset;
+    td_lrn.pilot_input = false;
+    td_lrn.spike_ms = 0;
+    td_lrn.still_loc_pending = true;
 
 #ifndef HAL_LANDING_DEEPSTALL_ENABLED
     if (plane.landing.get_type() == AP_Landing::TYPE_DEEPSTALL) {
@@ -474,6 +506,10 @@ void ModeAutoLand::check_takeoff_direction()
 #endif
 
     update_gps_fix_point();
+#if AP_BARO_THST_COMP_ENABLED
+    baro_learn_update();
+#endif
+    td_learn_update();
 
     // remember if this arming has flown (blocks a second ground TAKEOFF)
     if (!hal.util->get_soft_armed()) {
@@ -745,6 +781,434 @@ void ModeAutoLand::arm_check(void)
 bool ModeAutoLand::is_landing() const
 {
     return (plane.flight_stage == AP_FixedWing::FlightStage::LAND);
+}
+
+#if AP_BARO_THST_COMP_ENABLED
+/*
+  AUTOLAND_BAROLRN: the first second or two of a ground TAKEOFF is a free
+  static run-up. The aircraft can't change height while it stands still, so
+  any rise in the raw BARO1 pressure as the throttle comes up is the error
+  that BARO1_THST_SCALE compensates (prop wash pressurising the fuselage).
+  Fit a line through the origin of pressure rise against throttle and update
+  BARO1_THST_SCALE with it.
+ */
+void ModeAutoLand::baro_learn_takeoff_start(void)
+{
+    if (baro_learn <= 0 || !runway_options_enabled() || plane.is_flying() ||
+        baro_lrn.state != BaroLearnState::IDLE) {
+        return;
+    }
+    baro_lrn.state = BaroLearnState::WAIT;
+}
+
+void ModeAutoLand::baro_learn_update(void)
+{
+    const uint32_t now = AP_HAL::millis();
+    if (now - baro_lrn.last_ms < 50) {
+        // 20 Hz
+        return;
+    }
+    baro_lrn.last_ms = now;
+
+    AP_Baro &baro = AP::baro();
+    if (!hal.util->get_soft_armed()) {
+        if (baro_lrn.save_pending) {
+            baro.get_thrust_scale().save();
+            baro_lrn.save_pending = false;
+        }
+        baro_lrn.state = BaroLearnState::IDLE;
+        baro_lrn.base_n = 0;
+        return;
+    }
+
+    // forward acceleration, filtered (about 1 Hz) against vibration
+    const Vector3f &accel = plane.ahrs.get_accel_ef();
+    const float yaw = plane.ahrs.get_yaw_rad();
+    const float accel_fwd = accel.x * cosf(yaw) + accel.y * sinf(yaw);
+    baro_lrn.accel_fwd += 0.3f * (accel_fwd - baro_lrn.accel_fwd);
+
+    const float thr = baro.get_forward_throttle();
+    const float gs = plane.gps.ground_speed();
+    const bool baro_ok = baro.healthy(0);
+    const float press = baro.get_pressure(0);   // raw, before thrust/wind compensation
+    const bool parked = baro_ok && !plane.is_flying() && gs < 0.5f && thr < 0.05f;
+
+    if (baro_lrn.state == BaroLearnState::WAIT || baro_lrn.state == BaroLearnState::SAMPLING) {
+        if (plane.control_mode != &plane.mode_takeoff) {
+            // TAKEOFF left before the run-up was measured
+            baro_lrn.state = BaroLearnState::DONE;
+            return;
+        }
+    }
+
+    switch (baro_lrn.state) {
+    case BaroLearnState::IDLE:
+    case BaroLearnState::WAIT:
+        if (parked) {
+            // keep the last second of parked pressure as the baseline
+            baro_lrn.base[baro_lrn.base_idx] = press;
+            baro_lrn.base_idx = (baro_lrn.base_idx + 1) % BARO_LEARN_BASE_LEN;
+            baro_lrn.base_n = MIN(baro_lrn.base_n + 1, BARO_LEARN_BASE_LEN);
+            break;
+        }
+        if (baro_lrn.state == BaroLearnState::IDLE) {
+            baro_lrn.base_n = 0;
+            break;
+        }
+        // WAIT: the throttle is coming up (or the aircraft moved)
+        if (baro_lrn.base_n < BARO_LEARN_BASE_LEN / 2 || !baro_ok || plane.is_flying() || gs >= 0.5f) {
+            // less than 0.5 s parked with the motor at idle just before
+            baro_lrn.n = 0;
+            baro_lrn.base_sd = 0;
+            baro_lrn.state = BaroLearnState::DONE;
+            gcs().send_text(MAV_SEVERITY_INFO, "Baro: no still baseline, not learned");
+#if HAL_LOGGING_ENABLED
+            AP::logger().Write("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
+                               AP_HAL::micros64(), 0, 0.0f, thr, 0.0f, baro.get_thrust_scale().get(),
+                               baro.get_thrust_scale().get(), 0.0f, uint8_t(BaroLearnResult::NO_BASELINE));
+#endif
+            break;
+        }
+        {
+            // baseline: median and standard deviation of the parked samples
+            float sorted[BARO_LEARN_BASE_LEN];
+            const uint8_t n = baro_lrn.base_n;
+            float mean = 0;
+            for (uint8_t i = 0; i < n; i++) {
+                sorted[i] = baro_lrn.base[i];
+                mean += sorted[i];
+            }
+            mean /= n;
+            float var = 0;
+            for (uint8_t i = 0; i < n; i++) {
+                var += sq(sorted[i] - mean);
+                for (uint8_t j = i; j > 0 && sorted[j] < sorted[j-1]; j--) {
+                    const float t = sorted[j];
+                    sorted[j] = sorted[j-1];
+                    sorted[j-1] = t;
+                }
+            }
+            baro_lrn.base_sd = sqrtf(var / n);
+            baro_lrn.baseline = (n & 1) ? sorted[n/2] : 0.5f * (sorted[n/2 - 1] + sorted[n/2]);
+        }
+        baro_lrn.n = 0;
+        baro_lrn.n_fit = 0;
+        baro_lrn.sum_tp = 0;
+        baro_lrn.sum_tt = 0;
+        baro_lrn.thr_min = 1;
+        baro_lrn.thr_max = 0;
+        baro_lrn.start_ms = now;
+        baro_lrn.end_ms = now;
+        baro_lrn.state = BaroLearnState::SAMPLING;
+        FALLTHROUGH;
+
+    case BaroLearnState::SAMPLING:
+        if (!baro_ok || plane.is_flying() || gs >= 0.8f || baro_lrn.accel_fwd >= 1.0f ||
+            (baro_lrn.n > 0 && now - baro_lrn.start_ms > 10000)) {
+            // started rolling (or 10 s held still): the run-up is over
+            baro_learn_finish();
+            break;
+        }
+        {
+            const float dp = press - baro_lrn.baseline;
+            if (baro_lrn.n == 0) {
+                baro_lrn.start_ms = now;
+            }
+            baro_lrn.end_ms = now;
+            baro_lrn.n++;
+            baro_lrn.thr_min = MIN(baro_lrn.thr_min, thr);
+            baro_lrn.thr_max = MAX(baro_lrn.thr_max, thr);
+            if (thr >= 0.25f) {
+                baro_lrn.sum_tp += thr * dp;
+                baro_lrn.sum_tt += thr * thr;
+                baro_lrn.n_fit++;
+            }
+        }
+        break;
+
+    case BaroLearnState::DONE:
+        break;
+    }
+}
+
+void ModeAutoLand::baro_learn_finish(void)
+{
+    baro_lrn.state = BaroLearnState::DONE;
+
+    AP_Float &scale = AP::baro().get_thrust_scale();
+    const float old_scale = scale.get();
+    const float dur = (baro_lrn.end_ms - baro_lrn.start_ms) * 0.001f;
+    float measured = 0;
+    BaroLearnResult res = BaroLearnResult::ACCEPTED;
+    if (baro_lrn.n < 2 || dur < 1.0f || baro_lrn.thr_max < 0.35f ||
+        baro_lrn.thr_max - baro_lrn.thr_min < 0.2f || baro_lrn.n_fit < 3) {
+        res = BaroLearnResult::TOO_SHORT;
+    } else if (baro_lrn.base_sd >= 4.0f) {
+        res = BaroLearnResult::TOO_NOISY;
+    } else {
+        measured = baro_lrn.sum_tp / baro_lrn.sum_tt;
+        if (fabsf(measured) > 150.0f) {
+            res = BaroLearnResult::OUT_OF_RANGE;
+        }
+    }
+
+    float new_scale = old_scale;
+    switch (res) {
+    case BaroLearnResult::ACCEPTED:
+        // first measurement taken as is, then half way each takeoff
+        new_scale = is_zero(old_scale) ? measured : old_scale + 0.5f * (measured - old_scale);
+        // applied now, for the rest of the roll and the climb; saved at disarm
+        scale.set_and_notify(new_scale);
+        baro_lrn.save_pending = true;
+        gcs().send_text(MAV_SEVERITY_INFO, "Baro: throttle scale %.0f Pa (measured %.0f, was %.0f)",
+                        new_scale, measured, old_scale);
+        break;
+    case BaroLearnResult::TOO_SHORT:
+        gcs().send_text(MAV_SEVERITY_INFO, "Baro: run-up too short, not learned");
+        break;
+    case BaroLearnResult::TOO_NOISY:
+        gcs().send_text(MAV_SEVERITY_INFO, "Baro: run-up too noisy, not learned");
+        break;
+    case BaroLearnResult::OUT_OF_RANGE:
+        gcs().send_text(MAV_SEVERITY_INFO, "Baro: run-up out of range, not learned");
+        break;
+    case BaroLearnResult::NO_BASELINE:
+        break;
+    }
+
+#if HAL_LOGGING_ENABLED
+    // @LoggerMessage: BTLN
+    // @Description: AUTOLAND_BAROLRN: baro thrust error measured on the takeoff run-up
+    // @Field: TimeUS: Time since system startup
+    // @Field: N: run-up samples (20 Hz)
+    // @Field: Dur: run-up duration
+    // @Field: ThMx: highest throttle during the run-up (0 to 1)
+    // @Field: Meas: measured pressure rise at full throttle, Pa
+    // @Field: Old: BARO1_THST_SCALE before
+    // @Field: New: BARO1_THST_SCALE after
+    // @Field: BSd: standard deviation of the parked baseline, Pa
+    // @Field: Res: 0 accepted, 1 run-up too short, 2 too noisy, 3 out of range, 4 no still baseline
+    AP::logger().Write("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
+                       AP_HAL::micros64(), baro_lrn.n, dur, baro_lrn.thr_max, measured, old_scale,
+                       new_scale, baro_lrn.base_sd, uint8_t(res));
+#endif
+}
+#endif  // AP_BARO_THST_COMP_ENABLED
+
+/*
+  AUTOLAND_TDLRN: the landing aims AUTOLAND_TD_OFS short of the roll start.
+  Where it really touches down, measured along the runway line, tells how far
+  it floats after the flare. Set AUTOLAND_TD_OFS to that float so the next
+  landing touches down at the roll start.
+
+  Touchdown, after the flare starts: the rangefinder reading within 0.1 m of its
+  ground clearance; or, without one, the point where the sink stops for good
+  (EKF sink rate below 0.3 m/s for 1.5 s), taken at the first impact on the
+  accelerometer (0.25 g above 1 g) there if there is one. The baro isn't used:
+  its remaining airspeed error is what makes the landing float. A bounce
+  (climbing at 0.7 m/s, or the rangefinder 0.3 m above its ground clearance)
+  waits for the next contact. 2 s down without a bounce confirms it.
+ */
+void ModeAutoLand::td_learn_update(void)
+{
+    if (!hal.util->get_soft_armed()) {
+        if (td_lrn.state == TdLearnState::TOUCHED) {
+            td_learn_finish(TdLearnResult::ACCEPTED);
+        } else if (td_lrn.state == TdLearnState::WATCH && stage == AutoLandStage::LANDING) {
+            td_learn_finish(TdLearnResult::NOT_SEEN);
+        }
+        if (td_lrn.save_pending) {
+            td_offset.save();
+            td_lrn.save_pending = false;
+        }
+        td_lrn.state = TdLearnState::IDLE;
+        return;
+    }
+    if (td_lrn.state != TdLearnState::WATCH && td_lrn.state != TdLearnState::TOUCHED) {
+        return;
+    }
+    if (plane.control_mode != &plane.mode_autoland) {
+        if (stage == AutoLandStage::LANDING) {
+            td_learn_finish(TdLearnResult::MODE_CHANGE);
+        } else {
+            // left AUTOLAND before the final
+            td_lrn.state = TdLearnState::DONE;
+        }
+        return;
+    }
+    if (stage != AutoLandStage::LANDING) {
+        return;
+    }
+
+    // any stick input from the start of the final to the confirmed touchdown
+    if (abs(plane.channel_roll->get_control_in()) > 450 ||
+        abs(plane.channel_pitch->get_control_in()) > 450 ||
+        abs(plane.channel_rudder->get_control_in()) > 450 ||
+        plane.throttle_nudge != 0) {
+        td_lrn.pilot_input = true;
+    }
+
+    bool rf_down = false;
+    bool rf_up = false;
+#if AP_RANGEFINDER_ENABLED
+    {
+        const auto orient = plane.rangefinder_orientation();
+        const auto status = plane.rangefinder.status_orient(orient);
+        const int8_t q = plane.rangefinder.signal_quality_pct_orient(orient);
+        const float clear = plane.rangefinder.ground_clearance_orient(orient);
+        const float dist = plane.rangefinder.distance_orient(orient);
+        if (q < 0 || q >= 50) {
+            rf_down = status == RangeFinder::Status::OutOfRangeLow ||
+                      (status == RangeFinder::Status::Good && dist < clear + 0.1f);
+            rf_up = status == RangeFinder::Status::Good && dist > clear + 0.3f;
+        }
+    }
+#endif
+    // vertical acceleration above 1 g (body frame, up positive)
+    const float accel_up = -AP::ins().get_accel().z - GRAVITY_MSS;
+    // vertical speed, down positive (EKF, GPS aided: not affected by the baro error)
+    Vector3f vel;
+    const float vz = plane.ahrs.get_velocity_NED(vel) ? vel.z : 0.0f;
+    const uint32_t now = AP_HAL::millis();
+
+    if (td_lrn.state == TdLearnState::WATCH) {
+        if (!plane.landing.is_flaring() && plane.height_above_target() > 2.0f) {
+            // not near the ground yet
+            td_lrn.sink_ms = now;
+            td_lrn.spike_ms = 0;
+            td_lrn.still_loc_pending = true;
+            return;
+        }
+        if (rf_down) {
+            td_lrn.state = TdLearnState::TOUCHED;
+            td_lrn.touch_ms = now;
+            td_lrn.touch_loc = plane.current_loc;
+            td_lrn.accel = accel_up;
+            td_lrn.source = 1;
+            return;
+        }
+        // without a rangefinder: the touchdown is where the sink stops for good.
+        // A flare pull-up also shows on the accelerometer, but the aircraft keeps
+        // sinking after it; an impact on the wheels ends the sink.
+        if (accel_up > 2.5f && td_lrn.spike_ms == 0) {
+            td_lrn.spike_ms = now;
+            td_lrn.spike_loc = plane.current_loc;
+            td_lrn.spike_accel = accel_up;
+        }
+        if (vz > 0.3f || vz < -0.7f) {
+            // still sinking (or climbing)
+            td_lrn.sink_ms = now;
+            td_lrn.still_loc_pending = true;
+            if (td_lrn.spike_ms != 0 && now - td_lrn.spike_ms > 300) {
+                // that spike was not the touchdown
+                td_lrn.spike_ms = 0;
+            }
+            return;
+        }
+        if (td_lrn.still_loc_pending) {
+            td_lrn.still_loc_pending = false;
+            td_lrn.still_loc = plane.current_loc;
+        }
+        if (now - td_lrn.sink_ms > 1500) {
+            // down for 1.5 s: touched at the first impact, or where the sink stopped
+            const bool spike = td_lrn.spike_ms != 0;
+            td_lrn.state = TdLearnState::TOUCHED;
+            td_lrn.touch_ms = now;
+            td_lrn.touch_loc = spike ? td_lrn.spike_loc : td_lrn.still_loc;
+            td_lrn.accel = spike ? td_lrn.spike_accel : accel_up;
+            td_lrn.source = 0;
+        }
+        return;
+    }
+
+    // TOUCHED: a bounce means it is flying again, wait for the next contact
+    if (vz < -0.7f || rf_up) {
+        td_lrn.state = TdLearnState::WATCH;
+        td_lrn.sink_ms = now;
+        td_lrn.spike_ms = 0;
+        td_lrn.still_loc_pending = true;
+        return;
+    }
+    td_lrn.accel = MAX(td_lrn.accel, accel_up);
+    if (now - td_lrn.touch_ms > 2000) {
+        td_learn_finish(TdLearnResult::ACCEPTED);
+    }
+}
+
+void ModeAutoLand::td_learn_finish(TdLearnResult res)
+{
+    const bool touched = td_lrn.state == TdLearnState::TOUCHED;
+    td_lrn.state = TdLearnState::DONE;
+
+    // touchdown along the runway line from the roll start (positive = past it)
+    float along = 0;
+    float side = 0;
+    if (touched) {
+        const Vector2f ne = land_point.get_distance_NE(td_lrn.touch_loc);
+        const float hdg = radians(plane.takeoff_state.initial_direction.heading);
+        along = ne.x * cosf(hdg) + ne.y * sinf(hdg);
+        side = -ne.x * sinf(hdg) + ne.y * cosf(hdg);
+    }
+    // the float: distance from the aim point to the touchdown
+    const float floated = along + td_lrn.aim_ofs;
+
+    if (res == TdLearnResult::ACCEPTED) {
+        if (td_lrn.pilot_input) {
+            res = TdLearnResult::PILOT_INPUT;
+        } else if (fabsf(side) > 15.0f) {
+            res = TdLearnResult::OFF_LINE;
+        } else if (floated < -50.0f || floated > 100.0f) {
+            res = TdLearnResult::OUT_OF_RANGE;
+        }
+    }
+
+    const int16_t old_ofs = td_lrn.aim_ofs;
+    int16_t new_ofs = td_offset.get();
+    switch (res) {
+    case TdLearnResult::ACCEPTED: {
+        // first measurement taken as is, then half way each landing
+        const float ofs = (old_ofs == 0) ? floated : old_ofs + 0.5f * (floated - old_ofs);
+        new_ofs = constrain_int16(lroundf(ofs), 0, 50);
+        // used from the next AUTOLAND; saved at disarm
+        td_offset.set_and_notify(new_ofs);
+        td_lrn.save_pending = true;
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %+.0fm from roll start, TD_OFS %d (was %d)",
+                        along, new_ofs, old_ofs);
+        break;
+    }
+    case TdLearnResult::PILOT_INPUT:
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: pilot input, TD_OFS not learned");
+        break;
+    case TdLearnResult::OFF_LINE:
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %.0fm off the runway line, TD_OFS not learned", side);
+        break;
+    case TdLearnResult::OUT_OF_RANGE:
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %+.0fm from roll start, TD_OFS not learned", along);
+        break;
+    case TdLearnResult::MODE_CHANGE:
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: mode change, TD_OFS not learned");
+        break;
+    case TdLearnResult::NOT_SEEN:
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown not seen, TD_OFS not learned");
+        break;
+    }
+
+#if HAL_LOGGING_ENABLED
+    // @LoggerMessage: TDLN
+    // @Description: AUTOLAND_TDLRN: where the landing touched down
+    // @Field: TimeUS: Time since system startup
+    // @Field: Along: touchdown along the runway line from the roll start, positive past it
+    // @Field: Side: touchdown distance from the runway line, positive right
+    // @Field: Flt: float, from the aim point to the touchdown
+    // @Field: Acc: highest vertical acceleration above 1 g in the 2 s after the touchdown
+    // @Field: Old: AUTOLAND_TD_OFS the landing was aimed with
+    // @Field: New: AUTOLAND_TD_OFS after
+    // @Field: Src: touchdown seen by 0 the accelerometer, 1 the rangefinder
+    // @Field: Res: 0 accepted, 1 pilot input, 2 off the runway line, 3 out of range, 4 mode change, 5 touchdown not seen
+    AP::logger().Write("TDLN", "TimeUS,Along,Side,Flt,Acc,Old,New,Src,Res", "smmmomm--", "F000000--", "QffffhhBB",
+                       AP_HAL::micros64(), along, side, floated, td_lrn.accel, old_ofs, new_ofs,
+                       td_lrn.source, uint8_t(res));
+#endif
 }
 
 

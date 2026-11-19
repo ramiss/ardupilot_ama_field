@@ -110,13 +110,13 @@ jobs:
           {
             echo "### Batch ${{ matrix.batch.id }}"
             echo
-            echo "| Board | Status | Build | Flash used (B) | Flash free (B) | Note |"
-            echo "|---|---|---|---|---|---|"
+            echo "| Board | Status | Build | Baro comp | Flash used (B) | Flash free (B) | Note |"
+            echo "|---|---|---|---|---|---|---|"
             for f in ama-field-out/results/*.tsv; do
               case "$f" in *.removed.tsv) continue ;; esac
               [ -f "$f" ] || continue
-              IFS=$'\t' read -r b s t u fr files reason < "$f"
-              echo "| $b | $s | $t | $u | $fr | $reason |"
+              IFS=$'\t' read -r b s t u fr files reason baro < "$f"
+              echo "| $b | $s | $t | $baro | $u | $fr | $reason |"
             done
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v6

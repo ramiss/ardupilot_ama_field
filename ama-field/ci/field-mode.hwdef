@@ -1,0 +1,13 @@
+# AMA field mode release CI: features every field-mode build gets, applied to every
+# board before any trim tier; see ama-field/docs/DEVELOPMENT.md, "Release CI".
+#
+# Baro thrust compensation (BARO1_THST_SCALE, learned on takeoff by
+# AUTOLAND_BAROLRN) and wind (airspeed) compensation (BARO1_WCF_*). Thrust
+# compensation is off by default on every board, and minimize_common.inc (most
+# 1 MB boards) turns wind compensation off. A build without them relies on the
+# learned AUTOLAND_TD_OFS alone.
+
+undef HAL_BARO_WIND_COMP_ENABLED
+define HAL_BARO_WIND_COMP_ENABLED 1
+undef AP_BARO_THST_COMP_ENABLED
+define AP_BARO_THST_COMP_ENABLED 1

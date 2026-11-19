@@ -779,13 +779,31 @@ void Plane::rangefinder_height_update(void)
         // catch Lidars that are giving a constant range, either due
         // to misconfiguration or a faulty sensor
         if (rangefinder_state.in_range_count < 10) {
-            if (!is_equal(distance, rangefinder_state.last_distance) &&
+            const bool new_sample = !is_equal(distance, rangefinder_state.last_distance);
+            if (new_sample &&
                 fabsf(rangefinder_state.initial_range - distance) > 0.05f * rangefinder.max_distance_orient(rangefinder_orientation())) {
                 rangefinder_state.in_range_count++;
+            }
+            // custom: a sensor that reports a strong signal (quality >= 50%)
+            // on RANGEFINDER_STRONG_SAMPLES new samples in a row is live and
+            // seeing the ground, so it is in range without the 10 samples
+            // (1 s on a 10 Hz sensor) and the 5% change from the first reading.
+            // Sensors without a quality, and weak samples, use the rule above.
+            static constexpr uint8_t RANGEFINDER_STRONG_SAMPLES = 3;
+            if (new_sample) {
+                if (rangefinder.signal_quality_pct_orient(orientation) >= 50) {
+                    rangefinder_strong_count++;
+                } else {
+                    rangefinder_strong_count = 0;
+                }
             }
             if (fabsf(rangefinder_state.last_distance - distance) > rangefinder.max_distance_orient(rangefinder_orientation())*0.2) {
                 // changes by more than 20% of full range will reset counter
                 rangefinder_state.in_range_count = 0;
+                rangefinder_strong_count = 0;
+            }
+            if (rangefinder_strong_count >= RANGEFINDER_STRONG_SAMPLES) {
+                rangefinder_state.in_range_count = 10;
             }
         } else {
             rangefinder_state.in_range = true;
@@ -810,6 +828,7 @@ void Plane::rangefinder_height_update(void)
         rangefinder_state.last_distance = distance;
     } else {
         rangefinder_state.in_range_count = 0;
+        rangefinder_strong_count = 0;
         rangefinder_state.in_range = false;
     }
 

@@ -11,11 +11,25 @@ usage: autoland_circuit_test.py <outdir> [key=val ...]
   l1=13 damp=0.85 lvl=10        NAVL1_PERIOD, NAVL1_DAMPING, LEVEL_ROLL_LIMIT
   wpd=85 wpalt=20 gap=5 tdo=25 arc=90 rog=3
                                 AUTOLAND_WP_DIST/_WP_ALT/_SIDEGAP/_TD_OFS/_DSC_ARC/_RO_GAIN
+  tdl=0                         AUTOLAND_TDLRN (default 1: each landing learns AUTOLAND_TD_OFS;
+                                with wipe=0 the learned value carries to the next run)
   fa=2 fs=1 ls=0.6              LAND_FLARE_ALT, LAND_FLARE_SEC, TECS_LAND_SINK
   alt=50 away=12                height/seconds of the GUIDED leg before AUTOLAND
                                 (= the height AUTOLAND is selected at)
   rf=100 rfl=1                  SITL rangefinder, RNGFND_LANDING
+  rfmax=3                       RNGFND1_MAX (default 6); 3 = a small ToF sensor outdoors
+  rfs=2.8                       SIM_SONAR_STRONG: rangefinder reports a strong signal
+                                below 2.8 m, weak above (0/absent = no signal quality)
+  glitch=0.05                   SIM_SONAR_GLITCH (with rfs: weak random 2-5 m readings)
   wcf=0.3                       SIM_BARO_WCF_FWD (baro position error at speed)
+  thst=50                       SIM_BARO_THST (Pa at full throttle, prop-wash baro error)
+  bts=50 bwcf=0.15 lrn=1        BARO1_THST_SCALE, BARO1_WCF_FWD (+ BARO1_WCF_ENABLE 1),
+                                AUTOLAND_BAROLRN
+  slew=20                       TKOFF_THR_SLEW
+  hold=3                        hold the aircraft still for the first 3 s (sim) of TAKEOFF
+                                (no thrust from output 3): a static run-up for AUTOLAND_BAROLRN
+  wipe=0                        keep the parameters saved by the previous run in <outdir>
+                                (repeat runs to watch AUTOLAND_BAROLRN converge)
   loiter=90                     stop after N s of takeoff loiter (loiter-only test)
   block=1                       after landing try TAKEOFF again (should be refused),
                                 then disarm/re-arm and try again (should be accepted)
@@ -35,12 +49,19 @@ left = math.radians(HOME[3] - 90)
 extra = os.path.join(outdir, 'extra.parm')
 with open(extra, 'w') as f:
     if opt.get('rf'):
-        f.write('RNGFND1_TYPE %s\nRNGFND1_MAX 6\nRNGFND1_MIN 0.05\nRNGFND1_ORIENT 25\nSIM_SONAR_GLITCH %s\n' % (opt['rf'], opt.get('glitch', 0)))
+        f.write('RNGFND1_TYPE %s\nRNGFND1_MAX %s\nRNGFND1_MIN 0.05\nRNGFND1_ORIENT 25\nSIM_SONAR_GLITCH %s\n'
+                % (opt['rf'], opt.get('rfmax', 6), opt.get('glitch', 0)))
+        f.write('SIM_SONAR_STRONG %s\n' % opt.get('rfs', 0))
     if opt.get('wcf'): f.write('SIM_BARO_WCF_FWD %s\n' % opt['wcf'])
+    if opt.get('thst'): f.write('SIM_BARO_THST %s\n' % opt['thst'])
     f.write('SIM_WIND_SPD %s\nSIM_WIND_DIR %s\nSIM_WIND_TURB 0\n' % (opt.get('wind', 0), opt.get('wdir', 0)))
-    f.write('SIM_GPS1_GLTCH_X %.9f\nSIM_GPS1_GLTCH_Y %.9f\n' % (60*math.cos(left)/111111.0, 60*math.sin(left)/(111111.0*math.cos(math.radians(HOME[0])))))
+    # RC overrides never time out: at 8x speed a 0.4 s pause in this script would
+    # otherwise hand control to the simulator's own RC input (mode switch = MANUAL)
+    f.write('RC_OVERRIDE_TIME -1\n')
+    pits_glitch = (60*math.cos(left)/111111.0, 60*math.sin(left)/(111111.0*math.cos(math.radians(HOME[0]))))
+    f.write('SIM_GPS1_GLTCH_X %.9f\nSIM_GPS1_GLTCH_Y %.9f\n' % pits_glitch)
 proc = subprocess.Popen([BIN, '-S', '--model', 'plane', '--speedup', str(speedup), '--defaults', DEFAULTS + ',' + extra,
-                         '--home', ','.join(str(x) for x in HOME), '-I'+opt.get('inst','0'), '--wipe'],
+                         '--home', ','.join(str(x) for x in HOME), '-I'+opt.get('inst','0')] + (['--wipe'] if opt.get('wipe', '1') == '1' else []),
                         stdout=open('sitl_stdout.txt', 'w'), stderr=subprocess.STDOUT)
 time.sleep(3)
 m = mavutil.mavlink_connection('tcp:127.0.0.1:%d' % (5760+10*int(opt.get('inst','0'))), source_system=255, source_component=190)
@@ -128,6 +149,11 @@ params = dict(AUTOLAND_OPTIONS=int(opt.get('opts', 6)), AUTOLAND_SIDEGAP=int(opt
 if opt.get('slow', '1') == '1':
     params.update(AIRSPEED_MIN=12, AIRSPEED_CRUISE=15)
 if 'tdo' in opt: params['AUTOLAND_TD_OFS'] = int(opt['tdo'])
+if 'tdl' in opt: params['AUTOLAND_TDLRN'] = int(opt['tdl'])
+if 'bts' in opt: params['BARO1_THST_SCALE'] = float(opt['bts'])
+if 'bwcf' in opt: params.update(BARO1_WCF_ENABLE=1, BARO1_WCF_FWD=float(opt['bwcf']))
+if 'lrn' in opt: params['AUTOLAND_BAROLRN'] = int(opt['lrn'])
+if 'slew' in opt: params['TKOFF_THR_SLEW'] = int(opt['slew'])
 if 'arc' in opt: params['AUTOLAND_DSC_ARC'] = int(opt['arc'])
 if 'rog' in opt: params['AUTOLAND_RO_GAIN'] = float(opt['rog'])
 if 'block' in opt: params['LAND_DISARMDELAY'] = 0
@@ -166,7 +192,14 @@ if opt.get('rally') == '1':
     texts.append((phase, 'rally uploaded'))
 
 phase = 'takeoff'
+if opt.get('hold'):
+    # the SITL plane has no static friction and rolls at ~10% throttle; hold it
+    # (no thrust from output 3, throttle output still rising) for a real run-up
+    setp('SIM_ENGINE_MUL', 0); setp('SIM_ENGINE_FAIL', 4)
 set_mode('TAKEOFF')
+if opt.get('hold'):
+    pump(float(opt['hold']) / speedup)
+    setp('SIM_ENGINE_FAIL', 0)
 pump(35)      # climb + ~4 min of loiter (sim time)
 
 if opt.get('loiter'):
@@ -211,5 +244,8 @@ if ok:
         pump(3)
 json.dump(dict(opt=opt, home=HOME, stop=stop, pits=pits, rally=rally, track=track, texts=texts,
                autoland_engaged=ok), open('result.json', 'w'))
+# saved parameters are reused with wipe=0: put the "pits" GPS glitch back for the next boot
+setp('SIM_GPS1_GLTCH_X', pits_glitch[0]); setp('SIM_GPS1_GLTCH_Y', pits_glitch[1])
+pump(2)
 proc.terminate()
 print('done', flush=True)

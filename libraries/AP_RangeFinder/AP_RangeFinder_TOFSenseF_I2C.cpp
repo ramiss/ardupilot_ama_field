@@ -85,7 +85,8 @@ bool AP_RangeFinder_TOFSenseF_I2C::init(void)
 
     _dev->get_semaphore()->give();
 
-    _dev->register_periodic_callback(100000,
+    // 50 Hz, the MT-06 (TOFSense-F in IIC_NOOPLOOP mode) output rate
+    _dev->register_periodic_callback(20000,
                                      FUNCTOR_BIND_MEMBER(&AP_RangeFinder_TOFSenseF_I2C::timer, void));
 
     return true;
@@ -125,7 +126,7 @@ bool AP_RangeFinder_TOFSenseF_I2C::get_reading(uint32_t &reading_mm, uint16_t &s
     return ret;
 }
 
-//  timer called at 10Hz
+//  timer called at 50Hz
 void AP_RangeFinder_TOFSenseF_I2C::timer(void)
 {
     uint32_t dist_mm;
@@ -153,8 +154,11 @@ void AP_RangeFinder_TOFSenseF_I2C::update(void)
 {
     WITH_SEMAPHORE(_sem);
 #if HAL_LOGGING_ENABLED
-    if (new_raw) {
+    const uint32_t now_ms = AP_HAL::millis();
+    // every sample below 5m, 10 Hz above, to keep the MAVLink log rate down
+    if (new_raw && (raw_mm < 5000 || now_ms - last_rfss_ms >= 100)) {
         new_raw = false;
+        last_rfss_ms = now_ms;
         // @LoggerMessage: RFSS
         // @Description: TOFSense-F raw sample
         // @Field: TimeUS: Time since system startup

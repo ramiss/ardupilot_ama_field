@@ -71,6 +71,12 @@ const AP_Param::GroupInfo SIM::BaroParm::var_info[] = {
     // @Description: Barometer wind coefficient direction down in SITL
     // @User: Advanced
     AP_GROUPINFO("WCF_DN",  12, SIM::BaroParm, wcof_zn, 0.0),
+    // @Param: THST
+    // @DisplayName: Thrust pressure error
+    // @Description: Extra static pressure at full throttle, proportional to throttle, as from prop wash pressurising the fuselage. Positive makes the baro read low. Cancelled by BARO1_THST_SCALE of the same value.
+    // @Units: Pa
+    // @User: Advanced
+    AP_GROUPINFO("THST",    13, SIM::BaroParm, thst, 0.0),
     AP_GROUPEND
 };
 }

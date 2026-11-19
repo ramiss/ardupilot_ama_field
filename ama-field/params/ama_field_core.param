@@ -14,14 +14,27 @@ AUTOLAND_WP_ALT,20
 AUTOLAND_WP_DIST,100
 # FIELD: gap between the extended centreline and the base circle, metres
 AUTOLAND_SIDEGAP,5
-# AIRFRAME: aim this far short of the roll start; start at 0, then set to the overrun you measure
-AUTOLAND_TD_OFS,0
 # AIRFRAME: start the descent this many degrees before lined up on final (0 = level until lined up)
 AUTOLAND_DSC_ARC,90
 # AIRFRAME: rollout steering multiplier; start at 1, raise if it swings off as it slows
 AUTOLAND_RO_GAIN,1
+# AUTOLAND_TD_OFS (touchdown aim short of the roll start, for the float after the
+# flare) is deliberately not set here: the firmware default is a typical float, 20 m
+# (30 m on a board without baro compensation), and AUTOLAND_TDLRN refines it. If an
+# older setup saved 0, reset it to the default. Allow for up to 50 m in the fence.
+# learn AUTOLAND_TD_OFS on every AUTOLAND without stick input, saved at disarm
+AUTOLAND_TDLRN,1
 AUTOLAND_DIR_OFF,0
 AUTOLAND_CLIMB,0
+#
+# --- baro compensation (TUNING.md section 4) ---
+# AIRFRAME: Pa at full throttle; 0 = measured on the first auto takeoff (AUTOLAND_BAROLRN)
+BARO1_THST_SCALE,0
+# learn BARO1_THST_SCALE on every auto takeoff, saved at disarm
+AUTOLAND_BAROLRN,1
+BARO1_WCF_ENABLE,1
+# AIRFRAME: airspeed part; start at 0, set from baro_throttle.py after a landing
+BARO1_WCF_FWD,0
 #
 # --- runway circle is the RTL point; no rally points ---
 RTL_AUTOLAND,0
@@ -43,7 +56,7 @@ FENCE_ALT_MAX,120
 # FIELD: FBWB/CRUISE won't descend below this (land with AUTOLAND, FBWA or MANUAL)
 CRUISE_ALT_FLOOR,20
 #
-# --- landing basics (refine per airframe, TUNING.md section 5) ---
+# --- landing basics (refine per airframe, TUNING.md section 7) ---
 LAND_FLARE_SEC,1.5
 LAND_FLARE_ALT,2
 LAND_DISARMDELAY,20

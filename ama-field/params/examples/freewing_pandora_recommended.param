@@ -10,11 +10,31 @@ AUTOLAND_OPTIONS,6
 AUTOLAND_WP_ALT,20
 AUTOLAND_WP_DIST,85
 AUTOLAND_SIDEGAP,5
-AUTOLAND_TD_OFS,25
 AUTOLAND_DSC_ARC,90
 AUTOLAND_RO_GAIN,3
+# the firmware default. Uncompensated (v16) this aircraft floated 36-48 m past the aim;
+# the baro compensation removes part of that (SITL: 25-28 m left). AUTOLAND_TDLRN
+# refines it on every landing. Set explicitly to replace the 25 saved by v16.
+AUTOLAND_TD_OFS,20
+AUTOLAND_TDLRN,1
 AUTOLAND_DIR_OFF,0
 AUTOLAND_CLIMB,0
+#
+# --- baro compensation: STARTING VALUES (fuselage pressurised by the prop wash) ---
+# Pa at 100% throttle, from the static run-up in the logs (baro read ~4.2 m low at
+# full throttle); positive because the baro reads low with throttle. A seed:
+# AUTOLAND_BAROLRN refines it on every auto takeoff.
+BARO1_THST_SCALE,50
+AUTOLAND_BAROLRN,1
+BARO1_WCF_ENABLE,1
+# airspeed part; the estimate from the logs was <= 0.24 (an upper bound, from ground
+# speed). Confirm with idle low passes / baro_throttle.py after landings.
+BARO1_WCF_FWD,0.15
+BARO1_WCF_BCK,0
+BARO1_WCF_RGT,0
+BARO1_WCF_LFT,0
+BARO1_WCF_UP,0
+BARO1_WCF_DN,0
 #
 # --- takeoff (taildragger: tail held down with up elevator) ---
 TKOFF_ALT,50

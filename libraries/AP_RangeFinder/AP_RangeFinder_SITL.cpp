@@ -43,6 +43,21 @@ void AP_RangeFinder_SITL::update(void)
     state.distance_m = MAX(0, dist);
     state.last_reading_ms = AP_HAL::millis();
 
+    // SIM_SONAR_STRONG: signal quality like a small ToF sensor outdoors,
+    // with SIM_SONAR_GLITCH giving weak random readings
+    const float strong_m = AP::sitl()->sonar_strong;
+    if (is_positive(strong_m)) {
+        const float glitch = AP::sitl()->sonar_glitch;
+        if (is_positive(glitch) && glitch >= (rand_float() + 1.0f) * 0.5f) {
+            state.distance_m = 3.5f + 1.5f * rand_float();
+            state.signal_quality_pct = 20;
+        } else {
+            state.signal_quality_pct = (state.distance_m < strong_m) ? 100 : 20;
+        }
+    } else {
+        state.signal_quality_pct = RangeFinder::SIGNAL_QUALITY_UNKNOWN;
+    }
+
     // update range_valid state based on distance measured
     update_status();
 }
