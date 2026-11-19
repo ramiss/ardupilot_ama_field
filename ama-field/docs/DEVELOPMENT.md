@@ -153,7 +153,12 @@ from either message.
 
 1. Merge the changes into `ama-field-4.7.2`, and update the version history below.
 2. Optionally, do a full test build with *Run workflow* and an empty board list.
-3. Tag the commit and push the tag:
+3. Run the VS Code task **AMA field: Publish all builds** (*Terminal → Run Task*),
+   or `python ama-field/ci/publish_release.py`. It checks the working tree is clean
+   and `ama-field-4.7.2` is pushed, asks for the tag (it suggests the next
+   `ama-field-v<N>`; `17` or `v17` is enough) and a one-line message, shows a
+   summary and, once you confirm, creates and pushes the tag. `--dry-run` goes
+   through everything without tagging. By hand, the same is:
 
    ```bash
    git tag -a ama-field-v17 -m "AMA field mode v17"
@@ -161,13 +166,14 @@ from either message.
    ```
 
 4. Wait for the run to finish (roughly 30–60 minutes), then check the release
-   page.
+   page. The script prints both links.
 
 Files are named `ArduPlane-<fw>_AMAFieldMode_<version>_<Board>.apj` and
 `..._with_bl.hex`, where `<fw>` comes from `ArduPlane/version.h` and `<version>` is
 the tag without `ama-field-`. `SHA256SUMS.txt` covers every file.
 
-To redo a release, move the tag and push it again
+To redo a release, move the tag and push it again: run the task with the same tag
+and confirm moving it, or by hand
 (`git tag -f -a ama-field-v17 ...` then `git push -f origin ama-field-v17`). The
 new run cancels any run still going for that tag, then replaces the release notes
 and files.

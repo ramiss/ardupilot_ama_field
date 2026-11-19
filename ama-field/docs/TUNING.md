@@ -151,7 +151,9 @@ than one, leave `BARO_PRIMARY` at 0.
 ### 4.1 Throttle part (`BARO1_THST_SCALE`): automatic
 
 With `AUTOLAND_BAROLRN` 1 (the default), every TAKEOFF started on the ground
-measures it. Line up, stop, and select TAKEOFF with the motor at idle. The first
+measures it. Line up (point the aircraft straight down the runway by hand; see
+[Lining up](../../README.md#3-takeoff-and-the-runway-circle)), stop, and select
+TAKEOFF with the motor at idle. The first
 second or two of the roll is a static run-up: the throttle rises while the aircraft
 still stands still, so any change in the baro reading is the throttle error.
 
@@ -281,7 +283,7 @@ aircraft that floats further than that still lands somewhat long.
 | Weaves left and right on the roll or when taxiing | Lower `STEER2SRV_P`. |
 | Rudder already deflected when the roll starts | `STEER2SRV_I` 0. Stop fully before selecting TAKEOFF. |
 | Drifts sideways just after liftoff | `LEVEL_ROLL_LIMIT` 10–15. |
-| *"Autoland direction="* wrong by more than 5° | Calibrate the compass away from metal. Line up and **stop** before TAKEOFF so the idle heading is sampled. |
+| *"Autoland direction="* wrong by more than 5° | First, line up straighter: the aircraft must point exactly down the runway when you select TAKEOFF, because that is the direction it takes off and lands in. Then calibrate the compass away from metal. Line up and **stop** before TAKEOFF so the idle heading is sampled. |
 | Runway circle too close to the runway, or crosses it on the first lap | Raise `AUTOLAND_SIDEGAP`, or lower `NAVL1_PERIOD`. |
 | *"Takeoff blocked: pits side unknown"* | It was powered up on or near the runway line. Power cycle in the pits. |
 

@@ -12,7 +12,8 @@ takeoff, then keeps every automatic part of the flight on the far side of the ru
 
 The goal is a setup that a new pilot can fly safely:
 
-- **TAKEOFF** from where you lined up. It holds the runway line in a crosswind and
+- **TAKEOFF** from where you lined up (pointed the aircraft straight down the runway
+  by hand). It holds the runway line in a crosswind and
   climbs to a holding circle beside the runway, away from the pits.
 - **FBWB** as the everyday flying mode. It holds altitude and won't go below a floor
   height. If it hits the fence it turns back toward the field and hands control
@@ -89,7 +90,8 @@ the learned `AUTOLAND_TD_OFS`. See [TUNING.md](ama-field/docs/TUNING.md#44-board
 The design assumes:
 
 - **One runway** used in one direction per flight. The direction is whichever way
-  you line up for takeoff.
+  you line up for takeoff: the aircraft must point straight down the runway, because
+  the landing comes in along that same line.
 - **Pits and pilots on one side of the runway**, behind a flight line. The firmware
   learns which side from where the aircraft is powered up.
 - **A circular fence** around HOME (`FENCE_RADIUS`) that the whole circuit fits
@@ -114,8 +116,9 @@ take off with TAKEOFF.
 
 1. **Power up in the pits**, behind the flight line. Wait for *"Autoland: GPS fix
    point saved"*.
-2. **Arm**, taxi or carry the aircraft to the runway, line it up on the centreline
-   and **stop**.
+2. **Arm**, taxi or carry the aircraft to the runway, **line it up**, pointing it
+   straight down the centreline by hand, and **stop**. Any angle to the runway
+   becomes the landing direction too (see [Lining up](#3-takeoff-and-the-runway-circle)).
 3. **Select TAKEOFF.** It rolls, lifts off and climbs out along the runway line,
    then circles on the **runway circle** beside the runway, away from the pits.
 4. **Fly in FBWB.** The stick sets climb/descent and speed; altitude is held when
@@ -129,6 +132,15 @@ take off with TAKEOFF.
 
 ## 3. Takeoff and the runway circle
 
+> **Lining up.** Before selecting TAKEOFF, point the aircraft by hand (or by taxiing)
+> exactly straight down the runway centreline, then stop. The firmware takes the
+> direction the aircraft points at idle as the takeoff heading. The roll follows
+> it, and the landing direction comes from the roll and that heading. Nothing
+> corrects it to the runway: an aircraft lined up 10° off rolls 10° off, and
+> AUTOLAND then lands 10° across the runway. The final still ends at the roll
+> start, but 100 m out it is about 17 m to the side of the centreline, and the
+> rollout carries on across the runway at the same angle.
+
 **Before the roll**
 - TAKEOFF is refused on the ground if there is no compass heading or the pits side
   is unknown. It is also refused if this arming has already flown.
@@ -136,12 +148,14 @@ take off with TAKEOFF.
   can't leave the rudder wound up at the start of the roll.
 
 **The roll and climb-out**
-- The roll steers the heading you lined up on.
+- The roll steers the heading you lined up on, so line up straight (see *Lining
+  up* above).
 - The **roll start** is the last point where the armed aircraft stood still. It is
   saved as the touchdown reference.
 - The **runway direction** is the GPS track of the roll. If the roll veered more
   than 8° off the lined-up heading, the compass heading measured at idle is used
-  instead, so a swerve can't misalign the landing.
+  instead, so a swerve can't misalign the landing. A crooked line-up still does:
+  both directions come from it.
 - Climb-out **tracks the runway line** itself, not just a point ahead. A crosswind
   can't drift the climb over the pits.
 
@@ -275,9 +289,86 @@ aircraft at ~14 m/s; more for faster aircraft).
    - MANUAL or FBWA on another switch as the pilot's way out.
 5. **Tune in order**: takeoff (the first auto takeoff also measures the baro
    throttle error), baro airspeed compensation, circuit, flare and touchdown, then
-   rollout. Use
-   [TUNING.md](ama-field/docs/TUNING.md). It explains how to choose starting values
-   for your airframe and what to change for each symptom.
+   rollout. Follow the [quick start](#quick-start) below,
+   with [TUNING.md](ama-field/docs/TUNING.md) for how to choose starting values for
+   your airframe and what to change for each symptom.
+
+### Quick start
+
+For an aircraft that is already set up and flying well in FBWA/FBWB. Only the AMA
+field settings are listed; everything else is stock ArduPlane.
+
+**1. Turn it on**
+
+- Load [`ama_field_core.param`](ama-field/params/ama_field_core.param). It sets
+  `AUTOLAND_OPTIONS` 6 (land at the roll start, circuit away from the pits), the
+  fence bounce-back (`FENCE_ACTION` 6, `FENCE_RET_RALLY` 0), RTL to the runway circle
+  (`RTL_AUTOLAND` 0, no rally points) and the baro compensation.
+- Put AUTOLAND on a switch (`RCx_OPTION` 183) and TAKEOFF and FBWB on the mode
+  switch.
+
+**2. Fit the circuit to the field**
+
+| Parameter | Set to | Typical |
+|---|---|---|
+| `AUTOLAND_WP_ALT` | Tallest obstacle near the circuit + 5 m. The circuit never goes lower before the final. | 20 m |
+| `AUTOLAND_WP_DIST` | Final length, about 6–8 s at landing speed. | 80–120 m |
+| `AUTOLAND_SIDEGAP` | Gap between the centreline and the base circle. | 5–15 m |
+| `AUTOLAND_DSC_ARC` | Degrees of the final turn the descent starts on. | 90 |
+| `CRUISE_ALT_FLOOR` | FBWB/CRUISE floor, usually = `AUTOLAND_WP_ALT`. | 20 m |
+| `FENCE_RADIUS`, `FENCE_ALT_MAX` | Big enough for `AUTOLAND_WP_DIST` + base circle diameter + `AUTOLAND_TD_OFS` (up to 50 m) behind the roll start, plus the fence overshoot. | 240–300 m |
+
+The base circle radius is sized automatically from speed, wind and `ROLL_LIMIT_DEG`
+([TUNING.md 2.3](ama-field/docs/TUNING.md#23-checking-the-circuit-fits-the-fence)).
+
+**3. Leave the learned values at their defaults**
+
+| Parameter | Default | Learned from |
+|---|---|---|
+| `BARO1_THST_SCALE` | 0 | Every auto takeoff run-up (`AUTOLAND_BAROLRN` 1) |
+| `AUTOLAND_TD_OFS` | 20 m (30 m on a board without baro compensation) | Every AUTOLAND touchdown you don't touch (`AUTOLAND_TDLRN` 1) |
+| `BARO1_WCF_ENABLE` / `BARO1_WCF_FWD` | 1 / 0 | Set `BARO1_WCF_FWD` from `baro_throttle.py` after the first landings (step 6) |
+
+The airspeed baro compensation needs EKF3 (`AHRS_EKF_TYPE` 3, the default). On a
+board with two barometers keep `BARO_PRIMARY` 0: the thrust compensation applies to
+BARO1.
+
+**4. Airframe settings the field mode relies on**
+
+| Parameter | Set to | Why |
+|---|---|---|
+| `TKOFF_THR_SLEW` | 20–30 %/s | Gives the stationary run-up that measures `BARO1_THST_SCALE`. |
+| `STEER2SRV_I` | 0 | Stops the integrator winding up while taxiing. |
+| `TKOFF_TDRAG_ELEV` / `_SPD1` | Taildragger: 30–60 / just below `TKOFF_ROTATE_SPD`. Tricycle: 0 or negative. | Holds the steering wheel on the ground for the roll. |
+| `AUTOLAND_RO_GAIN` | 1, raised 0.5–1 at a time | Rollout steering as the rudder loses authority. |
+| `LAND_FLARE_SEC` / `_ALT`, `TECS_LAND_SINK`, `LAND_PITCH_DEG` | Core file values, then per airframe | The flare. The touchdown point is learned around it. |
+| `RNGFND_LANDING` | 1 with a downward rangefinder, else 0 | Optional. A sensor with signal strength (TOFSense-F / MT-06) is taken into use after 3 strong readings. |
+
+**5. Fly it**
+
+- **Power up in the pits**, behind the flight line. The first GPS fix is the pits
+  reference; arming waits for *"Autoland: GPS fix point saved"*.
+- **Line up, stop at idle, select TAKEOFF.** Point the aircraft exactly straight
+  down the runway by hand: the direction it points becomes the takeoff and landing
+  direction, and any angle to the runway lands it across the runway by the same
+  angle. The roll start becomes the landing point, and the run-up measures the baro
+  (*"Baro: throttle scale ..."*). One ground takeoff per arming.
+- **Fly FBWB.** The fence turns the aircraft back and resumes the mode.
+- **Flip AUTOLAND** at any height. It flies a level circuit on the far side, descends
+  on the final turn and lands at the roll start (*"Autoland: touchdown ...,
+  TD_OFS ..."*).
+- **Hands off** from the final to the rollout if you want the landing learned. Any
+  stick input or mode change just skips the learning for that landing.
+
+**6. After the first landings**
+
+- Run `ama-field/log-analysis/baro_throttle.py` on the logs and set `BARO1_WCF_FWD`
+  to the suggested value ([TUNING.md 4.2](ama-field/docs/TUNING.md#42-airspeed-part-baro1_wcf_fwd)).
+- `BARO1_THST_SCALE` and `AUTOLAND_TD_OFS` settle by themselves over 3–4 flights.
+  After a flare change, `AUTOLAND_TD_OFS` follows over the next landings.
+- Symptom-by-symptom tuning of the circuit, flare and rollout is in
+  [TUNING.md](ama-field/docs/TUNING.md); the
+  [Pandora example](#example-aircraft) shows one finished setup.
 
 ---
 
@@ -392,6 +483,10 @@ Every parameter, with how to choose its value, is covered in
   decide the flare on any final. Sensors without a signal strength need about 1 s
   of steady readings, as in stock ArduPilot. Expect roughly the same landings with
   no rangefinder; only the touchdown detection for `AUTOLAND_RO_GAIN` comes later.
+- **The runway direction is only as good as your line-up.** Point the aircraft
+  straight down the runway by hand before TAKEOFF; any angle carries into the
+  landing, which then comes in across the runway (see
+  [Lining up](#3-takeoff-and-the-runway-circle)).
 - **Compass interference** from motor current shifts the heading. The lined-up
   heading is sampled with the motor below 20 % for this reason.
 - **The fence overshoots** by roughly one turn diameter. Place the fence well inside
