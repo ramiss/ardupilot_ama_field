@@ -1069,8 +1069,8 @@ public:
     bool has_gps_fix_point() const { return gps_fix_loc_valid; }
     bool has_flown_this_arming() const { return flown_this_arming; }
     float get_rollout_gain() const { return rollout_gain; }
-    // true once the wheels are on the ground (rangefinder < 0.4m for 0.3s, or not flying)
-    bool wheels_on_ground();
+    // true once an AUTOLAND touchdown has been detected (see touchdown_update())
+    bool wheels_on_ground() const { return tdet.tier != TdTier::NONE; }
 
     // TAKEOFF pre-check: false (with a CRITICAL message) if the pits side is unknown
     bool takeoff_pits_check(void);
@@ -1104,7 +1104,30 @@ protected:
     Location gps_fix_loc;          // first good GPS fix point since boot (normally the pits)
     bool gps_fix_loc_valid = false;
     bool flown_this_arming = false;
-    uint32_t rf_ground_ms;
+
+    // touchdown detection on an AUTOLAND final, for the rollout steering and the
+    // touchdown learning. Tiers, sensor agnostic (RNGFNDx_MIN/_GNDCLR, status):
+    enum class TdTier : uint8_t {
+        NONE = 0,
+        GROUND_VISIBLE = 1,   // rangefinder reads its ground clearance
+        BLIND_ZONE = 2,       // rangefinder range ended at its minimum, sink stopped low down
+        NOT_FLYING = 3,       // no usable rangefinder: is_flying() false
+    };
+    struct {
+        TdTier tier;              // tier that detected the touchdown, NONE = not down
+        TdTier cand;              // tier whose condition holds now
+        uint32_t cand_ms;         // since when
+        Location cand_loc;        // where it started
+        bool seen_good;           // a Good rangefinder reading on this final
+        bool last_was_good;
+        bool blind_ok;            // the range ended near the minimum range (latched)
+        uint32_t last_good_ms;
+        float last_good_dist;
+        Location loc;             // touchdown position (start of the condition)
+    } tdet;
+    void touchdown_update(void);
+    void touchdown_reset(void);
+    void rangefinder_config_check(void);
 
 #if AP_BARO_THST_COMP_ENABLED
     // AUTOLAND_BAROLRN: BARO1_THST_SCALE from the stationary part of the takeoff run-up
@@ -1161,9 +1184,9 @@ protected:
     };
     struct {
         TdLearnState state;
-        bool pilot_input;       // stick input on the final, flare or rollout
+        bool pilot_input;       // elevator or throttle input on the final, flare or rollout
         bool save_pending;      // learned value to save at disarm
-        uint8_t source;         // touchdown seen by 0 the accelerometer, 1 the rangefinder
+        uint8_t source;         // touchdown seen by 0 the sink stopping, 1/2 the rangefinder (TdTier)
         int16_t aim_ofs;        // AUTOLAND_TD_OFS this landing was aimed with
         bool still_loc_pending; // record where the sink next stops
         uint32_t touch_ms;

@@ -103,6 +103,22 @@ RNGFND1_MIN,0.05
 RNGFND1_MAX,6
 RNGFND1_GNDCLR,0.11
 #
+# --- ALTERNATIVE: Benewake TF-Luna instead of the MT-06 (I2C: pin 5 to ground) ---
+# Not flown yet. To use it, comment out the MT-06 block above and uncomment these.
+# Check the boot message "TFMiniPlus: found fw version ..." (type 25 may not detect
+# a TF-Luna: see TUNING.md 2.4). 0.2 m minimum range: on this aircraft it can't see
+# the ground on its wheels, so touchdown uses blind-zone detection. Measure the
+# outdoor range on the first flight (low passes at 2, 4, 6, 8 m; RFSS in the log).
+#RNGFND1_TYPE,25
+#RNGFND1_ADDR,16
+#RNGFND1_ORIENT,25
+#RNGFND1_MIN,0.2
+#RNGFND1_MAX,8
+# measured: what it reads on the wheels; below RNGFND1_MIN it reads nothing there,
+# then set the lens height above the ground
+#RNGFND1_GNDCLR,0.11
+#RNGFND_LANDING,1
+#
 # --- MAVLink logging to the ESP32 logger on SERIAL3 (DJI port) ---
 # set LOG_BACKEND_TYPE 0 (and reboot) to turn logging off
 LOG_BACKEND_TYPE,2

@@ -154,19 +154,12 @@ void AP_RangeFinder_TOFSenseF_I2C::update(void)
 {
     WITH_SEMAPHORE(_sem);
 #if HAL_LOGGING_ENABLED
-    const uint32_t now_ms = AP_HAL::millis();
-    // every sample below 5m, 10 Hz above, to keep the MAVLink log rate down
-    if (new_raw && (raw_mm < 5000 || now_ms - last_rfss_ms >= 100)) {
+    if (new_raw) {
         new_raw = false;
-        last_rfss_ms = now_ms;
-        // @LoggerMessage: RFSS
-        // @Description: TOFSense-F raw sample
-        // @Field: TimeUS: Time since system startup
-        // @Field: D: raw distance
-        // @Field: Str: signal strength
-        // @Field: St: sensor status (1 = valid)
-        AP::logger().WriteStreaming("RFSS", "TimeUS,D,Str,St", "sm--", "F0--", "QfHH",
-                                    AP_HAL::micros64(), raw_mm * 0.001f, raw_strength, raw_status);
+        // RFSS: St is the sensor's status (1 = valid)
+        const bool valid = raw_status == 1;
+        log_raw_sample(raw_mm * 0.001f, raw_strength, uint8_t(MIN(raw_status, 255U)),
+                       valid ? raw_quality : 0, valid);
     }
 #endif
     if (new_distance) {

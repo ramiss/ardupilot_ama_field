@@ -106,19 +106,53 @@ void AP_RangeFinder_Benewake_TFMiniPlus::update()
 {
     WITH_SEMAPHORE(_sem);
 
+#if HAL_LOGGING_ENABLED
     if (accum.count > 0) {
-        state.distance_m = (accum.sum * 0.01f) / accum.count;
+        // the last raw sample of this update, valid or not (RFSS)
+        log_raw_sample(accum.last_raw_cm * 0.01f, accum.last_strength, accum.last_status,
+                       accum.last_quality, accum.last_status == RAW_VALID);
+    }
+#endif
+
+    if (accum.valid_count > 0) {
+        // custom: average only the valid samples (stock averaged the
+        // out-of-range placeholder in with them), and report their signal quality
+        state.distance_m = (accum.sum * 0.01f) / accum.valid_count;
+        state.signal_quality_pct = int8_t(accum.quality_sum / accum.valid_count);
         state.last_reading_ms = AP_HAL::millis();
-        accum.sum = 0;
-        accum.count = 0;
+        update_status();
+    } else if (accum.count > 0) {
+        // only unreliable samples: out of range high, as stock
+        state.distance_m = MAX(1200, max_distance()*100 + BENEWAKE_OUT_OF_RANGE_ADD_CM) * 0.01f;
+        state.signal_quality_pct = 0;
+        state.last_reading_ms = AP_HAL::millis();
         update_status();
     } else if (AP_HAL::millis() - state.last_reading_ms > 200) {
         set_status(RangeFinder::Status::NoData);
     }
+    accum.sum = 0;
+    accum.count = 0;
+    accum.valid_count = 0;
+    accum.quality_sum = 0;
 }
 
-void AP_RangeFinder_Benewake_TFMiniPlus::process_raw_measure(le16_t distance_raw, le16_t strength_raw,
-                                                             uint16_t &output_distance_cm)
+/*
+  custom: signal quality from the strength (Amp), provisional until checked
+  against flight data. TF-Luna manual (REV 01/04/2024), 3.3 Repeatability:
+  standard deviation 3 cm at Amp 100, 2 cm at 400, 1 cm at 1000, 0.5 cm at
+  2000 and above; Amp < 100 is unreliable. On that log scale: 0% at Amp 100,
+  50% at 316, 100% at 1000 and above, at least 1% for any valid sample.
+ */
+int8_t AP_RangeFinder_Benewake_TFMiniPlus::strength_to_quality(uint16_t strength)
+{
+    if (strength < 100 || strength >= 32768) {
+        return 0;
+    }
+    return int8_t(constrain_int16(lroundf(100.0f * log10f(strength * 0.01f)), 1, 100));
+}
+
+bool AP_RangeFinder_Benewake_TFMiniPlus::process_raw_measure(le16_t distance_raw, le16_t strength_raw,
+                                                             uint16_t &output_distance_cm, uint8_t &raw_status)
 {
     uint16_t strength = le16toh(strength_raw);
     const uint16_t MAX_DIST_CM = 1200;
@@ -126,17 +160,24 @@ void AP_RangeFinder_Benewake_TFMiniPlus::process_raw_measure(le16_t distance_raw
 
     output_distance_cm = le16toh(distance_raw);
 
-    if (strength < 100 || strength == 0xFFFF || output_distance_cm > MAX_DIST_CM) {
-        /*
-         * From manual: "when the signal strength is lower than 100 or equal to
-         * 65535, the detection is unreliable, TFmini Plus will set distance
-         * value to 0." - force it to the max distance so status is set to OutOfRangeHigh
-         * rather than NoData.
-         */
-        output_distance_cm = MAX(MAX_DIST_CM, max_distance()*100 + BENEWAKE_OUT_OF_RANGE_ADD_CM);
+    /*
+     * From manual: "when the signal strength is lower than 100 or equal to
+     * 65535, the detection is unreliable, TFmini Plus will set distance
+     * value to 0." TF-Luna manual: above 32768 means ambient light
+     * overexposure (e.g. facing the sun).
+     */
+    if (strength < 100) {
+        raw_status = RAW_WEAK;
+    } else if (strength >= 32768) {
+        raw_status = RAW_OVEREXPOSED;
+    } else if (output_distance_cm > MAX_DIST_CM) {
+        raw_status = RAW_TOO_FAR;
     } else {
+        raw_status = RAW_VALID;
         output_distance_cm = constrain_int16(output_distance_cm, MIN_DIST_CM, MAX_DIST_CM);
+        return true;
     }
+    return false;
 }
 
 bool AP_RangeFinder_Benewake_TFMiniPlus::check_checksum(uint8_t *arr, int pkt_len)
@@ -185,12 +226,26 @@ void AP_RangeFinder_Benewake_TFMiniPlus::timer()
         return;
     }
 
-    process_raw_measure(u.val.distance, u.val.strength, distance);
+    uint8_t raw_status;
+    const uint16_t raw_cm = le16toh(u.val.distance);
+    const uint16_t strength = le16toh(u.val.strength);
+    const bool valid = process_raw_measure(u.val.distance, u.val.strength, distance, raw_status);
 
     {
         WITH_SEMAPHORE(_sem);
-        accum.sum += distance;
         accum.count++;
+        if (valid) {
+            const int8_t q = strength_to_quality(strength);
+            accum.sum += distance;
+            accum.valid_count++;
+            accum.quality_sum += q;
+            accum.last_quality = q;
+        } else {
+            accum.last_quality = 0;
+        }
+        accum.last_raw_cm = raw_cm;
+        accum.last_strength = strength;
+        accum.last_status = raw_status;
     }
 }
 

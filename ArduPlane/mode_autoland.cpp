@@ -112,7 +112,7 @@ const AP_Param::GroupInfo ModeAutoLand::var_info[] = {
 
     // @Param: TDLRN
     // @DisplayName: Learn the touchdown offset on landing
-    // @Description: With AUTOLAND_OPTIONS bit 1, every AUTOLAND that touches down measures how far past its aim point it touched down (the float), and updates AUTOLAND_TD_OFS so the next landing touches down at the roll start: each landing moves it half way to the new measurement (the first measurement is taken as is if AUTOLAND_TD_OFS is 0), limited to 0-50m. The touchdown is the rangefinder reading on the ground or, without one, where the GPS-aided sink rate stops for good (at the wheel impact on the accelerometer if there is one); a bounce waits for the next contact. Not learned if the pilot moves the sticks or changes mode between the start of the final and 2 s after the touchdown, or if the touchdown is more than 15m off the runway line. Saved at disarm.
+    // @Description: With AUTOLAND_OPTIONS bit 1, every AUTOLAND that touches down measures how far past its aim point it touched down (the float), and updates AUTOLAND_TD_OFS so the next landing touches down at the roll start: each landing moves it half way to the new measurement (the first measurement is taken as is if AUTOLAND_TD_OFS is 0), limited to 0-50m. The touchdown is detected by the rangefinder (reading its ground clearance, or its range ending at its minimum with the sink stopped low down) or, without one, where the GPS-aided sink rate stops for good (at the wheel impact on the accelerometer if there is one); a bounce waits for the next contact. Not learned if the pilot moves the elevator stick, raises the throttle stick above 60% (it only acts above half way, as a throttle nudge; 0-60% is ignored), or changes mode, between the start of the final and 2 s after the touchdown, or if the touchdown is more than 15m off the runway line; aileron and rudder corrections are allowed. Saved at disarm.
     // @Values: 0:Off,1:Learn on each landing
     // @User: Standard
     AP_GROUPINFO("TDLRN", 11, ModeAutoLand, td_learn, 1),
@@ -393,28 +393,147 @@ void ModeAutoLand::update_target_altitude()
     Mode::update_target_altitude();
 }
 
-bool ModeAutoLand::wheels_on_ground()
+void ModeAutoLand::touchdown_reset(void)
 {
-    if (!plane.is_flying()) {
-        return true;
+    tdet.tier = TdTier::NONE;
+    tdet.cand = TdTier::NONE;
+    tdet.cand_ms = 0;
+    tdet.seen_good = false;
+    tdet.last_was_good = false;
+    tdet.blind_ok = false;
+    tdet.last_good_ms = 0;
+    tdet.last_good_dist = 0;
+}
+
+/*
+  touchdown detection on an AUTOLAND final, sensor agnostic: only the
+  configured RNGFNDx_MIN and RNGFNDx_GNDCLR, the rangefinder status, the
+  landing height and the EKF vertical speed. First tier whose condition holds
+  long enough wins:
+  1. ground visible: Good readings at or below GNDCLR + max(0.15 m, 10% of
+     GNDCLR), for 0.25 s; only GNDCLR + 0.05 m if GNDCLR is less than 0.05 m above
+     RNGFNDx_MIN (a sensor that can't see the ground never reads that low)
+  2. blind zone (the sensor can't read its ground clearance, or stops giving
+     Good readings at the bottom): the last Good reading was at or below
+     RNGFNDx_MIN + 0.3 m and at most 0.5 s before the range ended; the status
+     is still not Good; and corroborated by the landing height (compensated
+     baro plus the held rangefinder correction) under 1.5 m and the sink
+     stopped (EKF vertical speed under 0.3 m/s), for 0.3 s. A dropout at
+     altitude fails the height check, a dropout higher up the range fails the
+     minimum-range check.
+  3. no usable rangefinder (none, RNGFND_LANDING off, or nothing usable on
+     this final): is_flying() false
+  A climb at more than 0.7 m/s (bounce) un-detects it.
+ */
+void ModeAutoLand::touchdown_update(void)
+{
+    if (!hal.util->get_soft_armed() || plane.control_mode != &plane.mode_autoland ||
+        stage != AutoLandStage::LANDING) {
+        touchdown_reset();
+        return;
     }
-    bool rf_ground = false;
+    const uint32_t now = AP_HAL::millis();
+    Vector3f vel;
+    const float vz = plane.ahrs.get_velocity_NED(vel) ? vel.z : 0.0f;
+
+    if (tdet.tier != TdTier::NONE) {
+        if (vz < -0.7f) {
+            // bounced: airborne again
+            tdet.tier = TdTier::NONE;
+            tdet.cand = TdTier::NONE;
+        }
+        return;
+    }
+
+    TdTier cond = TdTier::NONE;
+    float dist = 0;
 #if AP_RANGEFINDER_ENABLED
     const auto orient = plane.rangefinder_orientation();
-    const int8_t q = plane.rangefinder.signal_quality_pct_orient(orient);
-    rf_ground = plane.rangefinder.status_orient(orient) == RangeFinder::Status::Good &&
-                plane.rangefinder.distance_orient(orient) < 0.4f &&
-                (q < 0 || q >= 50);
+    if (plane.rangefinder_use(RangeFinderUse::TAKEOFF_LANDING) && plane.rangefinder.has_orientation(orient)) {
+        const bool good = plane.rangefinder.status_orient(orient) == RangeFinder::Status::Good;
+        const float rmin = plane.rangefinder.min_distance_orient(orient);
+        const float clear = plane.rangefinder.ground_clearance_orient(orient);
+        dist = plane.rangefinder.distance_orient(orient);
+        if (good) {
+            tdet.seen_good = true;
+            tdet.last_good_ms = now;
+            tdet.last_good_dist = dist;
+            tdet.blind_ok = false;
+        } else if (tdet.last_was_good) {
+            // the range just ended: at the bottom of the sensor's range?
+            tdet.blind_ok = now - tdet.last_good_ms <= 500 && tdet.last_good_dist <= rmin + 0.3f;
+        }
+        tdet.last_was_good = good;
+
+        // GNDCLR within 0.05 m of the minimum range: only readings right at the
+        // ground clearance, so readings just above the minimum don't count
+        const float band = (clear >= rmin + 0.05f) ? MAX(0.15f, 0.1f * clear) : 0.05f;
+        if (good && dist <= clear + band) {
+            cond = TdTier::GROUND_VISIBLE;
+        } else if (!good && tdet.blind_ok) {
+            bool rf_active;
+            const float landing_hgt = plane.get_landing_height(rf_active);
+            if (landing_hgt < 1.5f && fabsf(vz) < 0.3f) {
+                cond = TdTier::BLIND_ZONE;
+            }
+        }
+    }
 #endif
-    const uint32_t now = AP_HAL::millis();
-    if (!rf_ground) {
-        rf_ground_ms = 0;
-        return false;
+    if (cond == TdTier::NONE && !plane.is_flying()) {
+        cond = TdTier::NOT_FLYING;
     }
-    if (rf_ground_ms == 0) {
-        rf_ground_ms = now;
+
+    if (cond != tdet.cand) {
+        tdet.cand = cond;
+        tdet.cand_ms = now;
+        tdet.cand_loc = plane.current_loc;
     }
-    return now - rf_ground_ms > 300;
+    const uint32_t hold_ms = (cond == TdTier::GROUND_VISIBLE) ? 250 : (cond == TdTier::BLIND_ZONE) ? 300 : 0;
+    if (cond == TdTier::NONE || now - tdet.cand_ms < hold_ms) {
+        return;
+    }
+    tdet.tier = cond;
+    tdet.loc = tdet.cand_loc;
+#if HAL_LOGGING_ENABLED
+    bool rf_active;
+    // @LoggerMessage: TDET
+    // @Description: AUTOLAND touchdown detected (rollout steering, touchdown learning)
+    // @Field: TimeUS: Time since system startup
+    // @Field: Tier: 1 rangefinder sees the ground, 2 rangefinder blind zone, 3 not flying (no usable rangefinder)
+    // @Field: Dly: time from the condition starting to the detection
+    // @Field: LH: landing height (compensated baro and held rangefinder correction)
+    // @Field: VZ: EKF vertical speed, down positive
+    // @Field: D: rangefinder distance now
+    // @Field: GD: last Good rangefinder distance
+    // @Field: GAge: time since the last Good rangefinder reading
+    AP::logger().WriteCritical("TDET", "TimeUS,Tier,Dly,LH,VZ,D,GD,GAge", "s-smnmms", "F-C00000", "QBIfffff",
+                       AP_HAL::micros64(), uint8_t(cond), now - tdet.cand_ms,
+                       plane.get_landing_height(rf_active), vz, dist, tdet.last_good_dist,
+                       tdet.seen_good ? (now - tdet.last_good_ms) * 0.001f : -1.0f);
+#endif
+}
+
+/*
+  information only, at arming: what the rangefinder can and can't do on this
+  setup (AUTOLAND_OPTIONS bits 1+2 and RNGFND_LANDING)
+ */
+void ModeAutoLand::rangefinder_config_check(void)
+{
+#if AP_RANGEFINDER_ENABLED
+    const auto orient = plane.rangefinder_orientation();
+    if (!runway_options_enabled() || !plane.rangefinder_use(RangeFinderUse::TAKEOFF_LANDING) ||
+        !plane.rangefinder.has_orientation(orient)) {
+        return;
+    }
+    if (plane.rangefinder.ground_clearance_orient(orient) < plane.rangefinder.min_distance_orient(orient)) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Rangefinder can't see ground on wheels: blind-zone touchdown");
+    }
+    float flare_alt = 0;
+    if (AP_Param::get("LAND_FLARE_ALT", flare_alt) &&
+        plane.rangefinder.max_distance_orient(orient) < flare_alt + 1.0f) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Rangefinder range below flare height: flare decided by baro");
+    }
+#endif
 }
 
 /*
@@ -509,6 +628,7 @@ void ModeAutoLand::check_takeoff_direction()
 #if AP_BARO_THST_COMP_ENABLED
     baro_learn_update();
 #endif
+    touchdown_update();
     td_learn_update();
 
     // remember if this arming has flown (blocks a second ground TAKEOFF)
@@ -769,6 +889,7 @@ bool ModeAutoLand::landing_lined_up(void)
 // possibly capture heading on arming for autoland mode if option is set and using a compass
 void ModeAutoLand::arm_check(void)
 {
+    rangefinder_config_check();
     if (autoland_option_is_set(ModeAutoLand::AutoLandOption::LAND_AT_ROLL_START)) {
         // direction comes from the takeoff roll instead
         return;
@@ -863,7 +984,7 @@ void ModeAutoLand::baro_learn_update(void)
             baro_lrn.state = BaroLearnState::DONE;
             gcs().send_text(MAV_SEVERITY_INFO, "Baro: no still baseline, not learned");
 #if HAL_LOGGING_ENABLED
-            AP::logger().Write("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
+            AP::logger().WriteCritical("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
                                AP_HAL::micros64(), 0, 0.0f, thr, 0.0f, baro.get_thrust_scale().get(),
                                baro.get_thrust_scale().get(), 0.0f, uint8_t(BaroLearnResult::NO_BASELINE));
 #endif
@@ -988,7 +1109,7 @@ void ModeAutoLand::baro_learn_finish(void)
     // @Field: New: BARO1_THST_SCALE after
     // @Field: BSd: standard deviation of the parked baseline, Pa
     // @Field: Res: 0 accepted, 1 run-up too short, 2 too noisy, 3 out of range, 4 no still baseline
-    AP::logger().Write("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
+    AP::logger().WriteCritical("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
                        AP_HAL::micros64(), baro_lrn.n, dur, baro_lrn.thr_max, measured, old_scale,
                        new_scale, baro_lrn.base_sd, uint8_t(res));
 #endif
@@ -1001,13 +1122,13 @@ void ModeAutoLand::baro_learn_finish(void)
   it floats after the flare. Set AUTOLAND_TD_OFS to that float so the next
   landing touches down at the roll start.
 
-  Touchdown, after the flare starts: the rangefinder reading within 0.1 m of its
-  ground clearance; or, without one, the point where the sink stops for good
-  (EKF sink rate below 0.3 m/s for 1.5 s), taken at the first impact on the
-  accelerometer (0.25 g above 1 g) there if there is one. The baro isn't used:
-  its remaining airspeed error is what makes the landing float. A bounce
-  (climbing at 0.7 m/s, or the rangefinder 0.3 m above its ground clearance)
-  waits for the next contact. 2 s down without a bounce confirms it.
+  Touchdown, after the flare starts: the rangefinder tiers of touchdown_update()
+  (ground visible, or blind zone), at the position where their condition
+  started; otherwise the point where the sink stops for good (EKF sink rate
+  below 0.3 m/s for 1.5 s), taken at the first impact on the accelerometer
+  (0.25 g above 1 g) there if there is one. The baro isn't used: its remaining
+  airspeed error is what makes the landing float. A bounce (climbing at
+  0.7 m/s) waits for the next contact. 2 s down without a bounce confirms it.
  */
 void ModeAutoLand::td_learn_update(void)
 {
@@ -1040,30 +1161,17 @@ void ModeAutoLand::td_learn_update(void)
         return;
     }
 
-    // any stick input from the start of the final to the confirmed touchdown
-    if (abs(plane.channel_roll->get_control_in()) > 450 ||
-        abs(plane.channel_pitch->get_control_in()) > 450 ||
-        abs(plane.channel_rudder->get_control_in()) > 450 ||
-        plane.throttle_nudge != 0) {
+    // elevator input, or the throttle stick above 60%, from the start of the final
+    // to the confirmed touchdown. The throttle stick only acts in AUTOLAND above
+    // half way (THROTTLE_NUDGE), so 0-60% is ignored: wherever a non-centring
+    // throttle rests, any reduction, and a small bump while using the rudder.
+    // Aileron and rudder corrections only change the direction and are allowed (a
+    // touchdown more than 15m off the runway line is still rejected)
+    if (abs(plane.channel_pitch->get_control_in()) > 450 ||
+        (plane.g.throttle_nudge && plane.channel_throttle->get_control_in() > 60)) {
         td_lrn.pilot_input = true;
     }
 
-    bool rf_down = false;
-    bool rf_up = false;
-#if AP_RANGEFINDER_ENABLED
-    {
-        const auto orient = plane.rangefinder_orientation();
-        const auto status = plane.rangefinder.status_orient(orient);
-        const int8_t q = plane.rangefinder.signal_quality_pct_orient(orient);
-        const float clear = plane.rangefinder.ground_clearance_orient(orient);
-        const float dist = plane.rangefinder.distance_orient(orient);
-        if (q < 0 || q >= 50) {
-            rf_down = status == RangeFinder::Status::OutOfRangeLow ||
-                      (status == RangeFinder::Status::Good && dist < clear + 0.1f);
-            rf_up = status == RangeFinder::Status::Good && dist > clear + 0.3f;
-        }
-    }
-#endif
     // vertical acceleration above 1 g (body frame, up positive)
     const float accel_up = -AP::ins().get_accel().z - GRAVITY_MSS;
     // vertical speed, down positive (EKF, GPS aided: not affected by the baro error)
@@ -1079,12 +1187,14 @@ void ModeAutoLand::td_learn_update(void)
             td_lrn.still_loc_pending = true;
             return;
         }
-        if (rf_down) {
+        if (tdet.tier == TdTier::GROUND_VISIBLE || tdet.tier == TdTier::BLIND_ZONE) {
+            // the rangefinder tiers of touchdown_update(), at the position the
+            // condition started
             td_lrn.state = TdLearnState::TOUCHED;
             td_lrn.touch_ms = now;
-            td_lrn.touch_loc = plane.current_loc;
+            td_lrn.touch_loc = tdet.loc;
             td_lrn.accel = accel_up;
-            td_lrn.source = 1;
+            td_lrn.source = uint8_t(tdet.tier);
             return;
         }
         // without a rangefinder: the touchdown is where the sink stops for good.
@@ -1122,7 +1232,7 @@ void ModeAutoLand::td_learn_update(void)
     }
 
     // TOUCHED: a bounce means it is flying again, wait for the next contact
-    if (vz < -0.7f || rf_up) {
+    if (vz < -0.7f || (td_lrn.source != 0 && tdet.tier == TdTier::NONE)) {
         td_lrn.state = TdLearnState::WATCH;
         td_lrn.sink_ms = now;
         td_lrn.spike_ms = 0;
@@ -1177,7 +1287,7 @@ void ModeAutoLand::td_learn_finish(TdLearnResult res)
         break;
     }
     case TdLearnResult::PILOT_INPUT:
-        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: pilot input, TD_OFS not learned");
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: elevator/throttle input, TD_OFS not learned");
         break;
     case TdLearnResult::OFF_LINE:
         gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %.0fm off the runway line, TD_OFS not learned", side);
@@ -1203,9 +1313,9 @@ void ModeAutoLand::td_learn_finish(TdLearnResult res)
     // @Field: Acc: highest vertical acceleration above 1 g in the 2 s after the touchdown
     // @Field: Old: AUTOLAND_TD_OFS the landing was aimed with
     // @Field: New: AUTOLAND_TD_OFS after
-    // @Field: Src: touchdown seen by 0 the accelerometer, 1 the rangefinder
-    // @Field: Res: 0 accepted, 1 pilot input, 2 off the runway line, 3 out of range, 4 mode change, 5 touchdown not seen
-    AP::logger().Write("TDLN", "TimeUS,Along,Side,Flt,Acc,Old,New,Src,Res", "smmmomm--", "F000000--", "QffffhhBB",
+    // @Field: Src: touchdown seen by 0 the sink stopping (accelerometer), 1 the rangefinder seeing the ground, 2 the rangefinder blind zone
+    // @Field: Res: 0 accepted, 1 elevator input or throttle stick above 60%, 2 off the runway line, 3 out of range, 4 mode change, 5 touchdown not seen
+    AP::logger().WriteCritical("TDLN", "TimeUS,Along,Side,Flt,Acc,Old,New,Src,Res", "smmmomm--", "F000000--", "QffffhhBB",
                        AP_HAL::micros64(), along, side, floated, td_lrn.accel, old_ofs, new_ofs,
                        td_lrn.source, uint8_t(res));
 #endif

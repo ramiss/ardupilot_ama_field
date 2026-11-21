@@ -3,7 +3,8 @@
 **Auto takeoff, fly in FBWB, one switch to land – without ever crossing the flight
 line.**
 
-A set of extensions to **ArduPlane 4.7.2** for flying at a typical club (AMA) field:
+A set of extensions added to, and re-compiled as, **ArduPlane 4.7.2** for flying as a new pilot in training at a typical club (AMA) field:
+The 
 one runway, with the pits and pilots' line along one side of it. The usual rule at
 such a field is that nothing flies on the pilot side of the runway. Stock ArduPlane
 modes don't know where the pits are. They will loiter, turn onto final or come home
@@ -12,25 +13,42 @@ takeoff, then keeps every automatic part of the flight on the far side of the ru
 
 The goal is a setup that a new pilot can fly safely:
 
-- **TAKEOFF** from where you lined up (pointed the aircraft straight down the runway
+- **AUTO TAKEOFF** from where you lined up (pointed the aircraft straight down the runway - on one switch.
   by hand). It holds the runway line in a crosswind and
   climbs to a holding circle beside the runway, away from the pits.
-- **FBWB** as the everyday flying mode. It holds altitude and won't go below a floor
+- **FBWB** Once ready, the pilot flips into FBWB as the everyday flying mode. It holds altitude and won't go below a floor
   height. If it hits the fence it turns back toward the field and hands control
   back to the pilot.
 - **AUTOLAND** on one switch. It flies a level circuit on the far side, descends
   only once it's turning onto final, and kicks out the crab in the flare. It touches
   down where the takeoff roll started, then holds the runway heading until it stops.
 
-The behaviour is built into ArduPlane, so it works on **any board and any airframe
+The inherent behaviour is built into ArduPlane, this custom version essentially controls where the plane is allowed to fly, so it works on **any board and any airframe
 that takes off from a runway**. That means a conventional plane with a rudder, GPS
-and compass; a rangefinder is optional. Development and flight testing used one
+and compass; a rangefinder is optional and will increase landing accuracy. Development and flight testing used one
 aircraft, a Freewing Pandora. Its settings are included only as a
 [worked example](#example-aircraft).
 
 > **Experimental firmware.** Everything here was tested in ArduPilot SITL and on one
-> airframe over about 20 flights. Fly every change with a thumb on the mode switch
+> airframe over about 20 flights. Experienced pilots should set up and test the aircraft before handing to a new pilot. Initial setup should test every change with a thumb on the mode switch
 > and a MANUAL fallback, and follow your club's and the AMA's safety code.
+
+**Minimum hardware**
+
+- **An ArduPilot flight controller that runs ArduPlane 4.7**, with its barometer. See list of boards and compiled builds on the Releases tab.
+  Every ArduPilot board has one; the field mode corrects it for prop wash and
+  airspeed.
+- **GPS**: for the pits reference, the roll start (landing point) and the runway
+  direction.
+- **Compass**: required. ArduPlane can fly without one, but the field mode can't.
+  The heading the aircraft is lined up on at idle is the takeoff heading and the
+  check on the runway direction, so TAKEOFF is refused without a healthy compass.
+- **A wheeled aircraft with a rudder** that takes off from a runway or grass strip.
+  A steerable tail or nose wheel is best.
+- Optional: a downward rangefinder for a more precise flare and touchdown. An airspeed
+  sensor isn't needed.
+
+Details are in [What your aircraft needs](#6-what-your-aircraft-needs).
 
 The original ArduPilot README is in [README-ArduPilot.md](README-ArduPilot.md).
 
@@ -244,7 +262,7 @@ aircraft at ~14 m/s; more for faster aircraft).
 | **Compass** (healthy, calibrated) | Lined-up heading. TAKEOFF is refused without it. |
 | **Rudder**, ideally with a **steerable nose or tail wheel** | Ground steering on the roll, flare de-crab and rollout steering. A flying wing without a rudder gets the circuit, but none of the steering behaviour. |
 | **Any ArduPilot board that runs ArduPlane 4.7** | The features are in ArduPlane itself, not in a board definition, and add only a little flash. |
-| Downward **rangefinder** (optional) | Refines touchdown detection and the final metre of the flare. See [section 10](#10-limitations-and-safety-notes). |
+| Downward **rangefinder** (optional) | Refines touchdown detection and the flare. Any ArduPilot rangefinder works: the field mode uses only its `RNGFND1_MIN`, `RNGFND1_MAX` and `RNGFND1_GNDCLR`, its status and, if it reports one, its signal quality. **Range matters:** a sensor that really reaches 4 m or more outdoors (a Benewake TF-Luna, or a longer-range lidar or radar) lets the rangefinder decide the flare on any final; a small ToF sensor like the MicoAir MT-06 only engages at about 2.5–3 m. A **minimum range** above the sensor's height on the wheels (the TF-Luna's 0.2 m) is handled by blind-zone touchdown detection. See [TUNING.md 2.4](ama-field/docs/TUNING.md#24-rangefinder-or-not) and [section 10](#10-limitations-and-safety-notes). |
 | Airspeed sensor (optional) | Not needed; the test aircraft had none. |
 
 **Airframe types**
@@ -260,13 +278,19 @@ aircraft at ~14 m/s; more for faster aircraft).
 
 - A board definition for the **FlyingRC F4Wing Mini**, which is not in upstream
   ArduPilot. It has MAVLink logging to an external logger enabled.
-- Signal strength reporting, 50 Hz polling and a raw-sample log (`RFSS`) for
-  **TOFSense-F / MicoAir MT-06** I2C rangefinders.
+- Signal quality reporting and a raw-sample log (`RFSS`) for **TOFSense-F / MicoAir
+  MT-06** and **Benewake I2C (`RNGFND1_TYPE` 25, TFmini Plus; TF-Luna, if it is
+  detected)** rangefinders. The TOFSense-F is polled at 50 Hz.
 - A **rangefinder plausibility gate** in ArduPlane. It rejects readings that disagree
   with baro height, unless the sensor reports a strong signal. This applies to any
-  rangefinder and protects against bad readings at approach height. A sensor that
-  reports a strong signal on 3 readings in a row is also taken as in range at once,
-  instead of after 10 readings.
+  rangefinder and protects against bad readings at approach height.
+- **Rangefinder handling on the AUTOLAND final, for any sensor:**
+  - it is taken into use once its readings have followed the aircraft's own descent
+    for 0.2 s (6 samples if the signal is weak or unreported: 0.5 s at 10 Hz);
+  - the rangefinder correction is held as the aircraft goes below the sensor's
+    minimum range;
+  - touchdown is detected from the ground clearance, or from the blind zone below
+    the minimum range.
 
 ---
 
@@ -316,7 +340,7 @@ field settings are listed; everything else is stock ArduPlane.
 | `AUTOLAND_SIDEGAP` | Gap between the centreline and the base circle. | 5–15 m |
 | `AUTOLAND_DSC_ARC` | Degrees of the final turn the descent starts on. | 90 |
 | `CRUISE_ALT_FLOOR` | FBWB/CRUISE floor, usually = `AUTOLAND_WP_ALT`. | 20 m |
-| `FENCE_RADIUS`, `FENCE_ALT_MAX` | Big enough for `AUTOLAND_WP_DIST` + base circle diameter + `AUTOLAND_TD_OFS` (up to 50 m) behind the roll start, plus the fence overshoot. | 240–300 m |
+| `FENCE_RADIUS`, `FENCE_ALT_MAX` | Big enough for `AUTOLAND_WP_DIST` + `AUTOLAND_TD_OFS` (up to 50 m) + base circle radius behind the roll start, and `AUTOLAND_SIDEGAP` + 2 × radius to the side, plus the fence overshoot. | 240–300 m |
 
 The base circle radius is sized automatically from speed, wind and `ROLL_LIMIT_DEG`
 ([TUNING.md 2.3](ama-field/docs/TUNING.md#23-checking-the-circuit-fits-the-fence)).
@@ -342,7 +366,7 @@ BARO1.
 | `TKOFF_TDRAG_ELEV` / `_SPD1` | Taildragger: 30–60 / just below `TKOFF_ROTATE_SPD`. Tricycle: 0 or negative. | Holds the steering wheel on the ground for the roll. |
 | `AUTOLAND_RO_GAIN` | 1, raised 0.5–1 at a time | Rollout steering as the rudder loses authority. |
 | `LAND_FLARE_SEC` / `_ALT`, `TECS_LAND_SINK`, `LAND_PITCH_DEG` | Core file values, then per airframe | The flare. The touchdown point is learned around it. |
-| `RNGFND_LANDING` | 1 with a downward rangefinder, else 0 | Optional. A sensor with signal strength (TOFSense-F / MT-06) is taken into use after 3 strong readings. |
+| `RNGFND_LANDING` | 1 with a downward rangefinder, else 0 | Optional, any sensor. Set `RNGFND1_MIN`, `_MAX` and `_GNDCLR` (measured on the wheels) correctly: the field mode uses them to decide engagement and touchdown. |
 
 **5. Fly it**
 
@@ -357,8 +381,13 @@ BARO1.
 - **Flip AUTOLAND** at any height. It flies a level circuit on the far side, descends
   on the final turn and lands at the roll start (*"Autoland: touchdown ...,
   TD_OFS ..."*).
-- **Hands off** from the final to the rollout if you want the landing learned. Any
-  stick input or mode change just skips the learning for that landing.
+- **Leave the elevator alone, and the throttle stick below 60 %**, from the final
+  until a few seconds after touchdown if you want the landing learned. The throttle
+  stick doesn't need centring: in AUTOLAND it does nothing below half way (stock
+  ArduPlane throttle nudge), so idle is the natural place for it, and 0–60 % is
+  ignored by the learning. Above half it adds throttle and lengthens the landing.
+  Aileron and rudder corrections are fine. Elevator input, the throttle stick above
+  60 %, or a mode change just skips the learning for that landing.
 
 **6. After the first landings**
 
@@ -383,7 +412,7 @@ BARO1.
 | `AUTOLAND_RO_GAIN` | 1.0 | 1–5 | 1–3 | Steering multiplier from touchdown until stopped. |
 | `AUTOLAND_BAROLRN` | 1 | 0–1 | 1 | Learn `BARO1_THST_SCALE` on each auto takeoff's run-up, apply it straight away and save it at disarm. 0 = off. |
 | `AUTOLAND_TD_OFS` | 20 (30 without baro comp) | -50–100 m | 10–40 | Aims the landing this far short of the roll start to absorb the float after the flare. The default is a typical float, so an untrained aircraft lands near the roll start. Learned by `AUTOLAND_TDLRN`. |
-| `AUTOLAND_TDLRN` | 1 | 0–1 | 1 | Measure where each AUTOLAND touches down and move `AUTOLAND_TD_OFS` half way toward the float it measured (0–50 m), used from the next landing and saved at disarm. Not learned after stick input or a mode change. 0 = off. |
+| `AUTOLAND_TDLRN` | 1 | 0–1 | 1 | Measure where each AUTOLAND touches down and move `AUTOLAND_TD_OFS` half way toward the float it measured (0–50 m), used from the next landing and saved at disarm. Not learned after elevator input, the throttle stick above 60 %, or a mode change; aileron and rudder corrections are allowed. 0 = off. |
 
 ### Baro compensation
 
@@ -450,8 +479,10 @@ Every parameter, with how to choose its value, is covered in
 | Baro: run-up too noisy / out of range, not learned | The parked baro reading was unsteady (wind gusts, someone moving the aircraft), or the result was implausible. Nothing changed. |
 | Baro: no still baseline, not learned | TAKEOFF was selected without half a second standing still at idle first. Nothing changed. |
 | Rangefinder engaged at Nm | The rangefinder is now used for the flare and touchdown. |
+| Rangefinder can't see ground on wheels: blind-zone touchdown | At arming: `RNGFND1_GNDCLR` is below `RNGFND1_MIN`, so touchdown is detected from the range ending at the bottom (information only). |
+| Rangefinder range below flare height: flare decided by baro | At arming: `RNGFND1_MAX` is less than `LAND_FLARE_ALT` + 1 m (information only). |
 | Autoland: touchdown +Nm from roll start, TD_OFS N (was O) | Where this landing touched down (+ past the roll start); `AUTOLAND_TD_OFS` for the next landing, saved at disarm. |
-| Autoland: pilot input / mode change, TD_OFS not learned | You moved the sticks or changed mode during the final, flare or first 2 s of the rollout. Nothing changed. |
+| Autoland: elevator/throttle input / mode change, TD_OFS not learned | During the final, flare or first 2 s of the rollout you moved the elevator stick, raised the throttle stick above 60 %, or changed mode. Nothing changed. Aileron and rudder corrections, and the throttle stick anywhere from 0 to 60 %, don't stop the learning. |
 | Autoland: touchdown Nm off the runway line / +Nm from roll start, TD_OFS not learned | The touchdown was more than 15 m to the side, or implausibly far from the aim. Nothing changed. |
 | Autoland: touchdown not seen, TD_OFS not learned | It disarmed before a touchdown was confirmed. Nothing changed. |
 
@@ -475,14 +506,25 @@ Every parameter, with how to choose its value, is covered in
     the baro reads lower, TECS thinks the aircraft is low and adds more throttle.
     It also makes the takeoff heights happen higher than set, and the flare start
     high and float.
-- **Rangefinders**: a small ToF sensor outdoors over grass gives strong returns only
-  below about 2.5–3 m. A sensor that reports signal strength engages after 3 strong
-  readings in a row, so an MT-06 engages at about 2.5–3 m. That is early enough to
-  decide a flare at about 2 m on a shallow final (`AUTOLAND_DSC_ARC` 90). The range
-  is still the limit: a longer-range sensor (lidar or radar) lets the rangefinder
-  decide the flare on any final. Sensors without a signal strength need about 1 s
-  of steady readings, as in stock ArduPilot. Expect roughly the same landings with
-  no rangefinder; only the touchdown detection for `AUTOLAND_RO_GAIN` comes later.
+- **Rangefinders: range matters.**
+  - **Outdoor range is less than rated.** `RNGFND1_MAX` is only the configured
+    limit; the *usable* range outdoors, in sun over grass, is often much shorter.
+    The MT-06 gives strong returns only below about 2.5–3 m, so it engages at about
+    2.5–3 m: enough to decide a flare at about 2 m on a shallow final
+    (`AUTOLAND_DSC_ARC` 90).
+  - **A longer-range sensor decides the flare on any final.** A sensor that really
+    reaches 4 m or more outdoors (a TF-Luna, rated 8 m at 90% reflectivity and
+    2.5 m at 10%, or a lidar or radar) does. Measure your sensor's real range on
+    the first flight (`RFSS` / `ALRF` in the log); don't assume it.
+  - **Engagement is the same for every sensor:** readings that follow the
+    aircraft's descent for 0.2 s, with or without a signal quality (a slow sensor
+    without a strong signal needs 6 samples, 0.5 s at 10 Hz).
+  - **Below the minimum range:** a sensor whose minimum range is above its height on
+    the wheels (the TF-Luna's 0.2 m) is blind on the ground. Touchdown is then
+    detected from the range ending at the bottom, with the baro height and the sink
+    stopping.
+  - **No rangefinder:** expect roughly the same landings; only the touchdown
+    detection for `AUTOLAND_RO_GAIN` comes later.
 - **The runway direction is only as good as your line-up.** Point the aircraft
   straight down the runway by hand before TAKEOFF; any angle carries into the
   landing, which then comes in across the runway (see
@@ -492,7 +534,7 @@ Every parameter, with how to choose its value, is covered in
 - **The fence overshoots** by roughly one turn diameter. Place the fence well inside
   the area you really need to protect.
 - **A breach during AUTOLAND abandons the landing.** Keep the circuit inside the
-  fence: roughly `AUTOLAND_WP_DIST` + 2 × circle radius + `AUTOLAND_TD_OFS` behind
+  fence: roughly `AUTOLAND_WP_DIST` + `AUTOLAND_TD_OFS` + circle radius behind
   the roll start (the learning can raise `AUTOLAND_TD_OFS` to 50 m), and up to about
   2 × radius + `AUTOLAND_SIDEGAP` to the side.
 - **LOITER mode** circles wherever it is selected, including over the pits. Only the

@@ -54,14 +54,28 @@ private:
     bool init() override;
     void timer();
 
-    void process_raw_measure(le16_t distance_raw, le16_t strength_raw,
-                             uint16_t &output_distance_cm);
+    // raw sample status, as logged in RFSS.St
+    static constexpr uint8_t RAW_WEAK = 0;          // strength < 100: unreliable
+    static constexpr uint8_t RAW_VALID = 1;
+    static constexpr uint8_t RAW_OVEREXPOSED = 2;   // strength >= 32768 (0xFFFF = saturated)
+    static constexpr uint8_t RAW_TOO_FAR = 3;       // beyond the driver's 12 m limit
+
+    // true if the sample is valid; output_distance_cm is only set then
+    bool process_raw_measure(le16_t distance_raw, le16_t strength_raw,
+                             uint16_t &output_distance_cm, uint8_t &raw_status);
+    static int8_t strength_to_quality(uint16_t strength);
 
     bool check_checksum(uint8_t *arr, int pkt_len);
 
     struct {
-        uint32_t sum;
-        uint32_t count;
+        uint32_t sum;           // valid samples only, cm
+        uint32_t count;         // all samples
+        uint32_t valid_count;
+        uint32_t quality_sum;
+        uint16_t last_raw_cm;
+        uint16_t last_strength;
+        uint8_t last_status;
+        int8_t last_quality;
     } accum;
 };
 

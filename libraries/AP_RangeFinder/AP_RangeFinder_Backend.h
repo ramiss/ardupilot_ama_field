@@ -96,6 +96,14 @@ protected:
     RangeFinder::RangeFinder_State &state;
     AP_RangeFinder_Params &params;
 
+#if HAL_LOGGING_ENABLED
+    // custom: raw sample log (RFSS) for drivers that report a signal strength:
+    // every valid sample below RNGFNDx_MAX, at most 10 Hz otherwise (weak,
+    // saturated or beyond the configured range)
+    void log_raw_sample(float raw_m, uint16_t strength, uint8_t sensor_status, int8_t quality_pct, bool valid);
+    uint32_t last_raw_log_ms;
+#endif
+
     // semaphore for access to shared frontend data
     HAL_Semaphore _sem;
 

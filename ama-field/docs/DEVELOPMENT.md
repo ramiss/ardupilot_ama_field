@@ -20,6 +20,22 @@ Tools/environment_install/install-prereqs-ubuntu.sh -y   # once; then log out an
 **Re-run `./waf configure` whenever you switch boards or edit a `hwdef.dat`.** waf
 only reads hwdef changes at configure time.
 
+**Or build exactly as the release CI does**, from Windows or Linux, with the VS Code
+task **AMA field: Build locally** (*Terminal → Run Task*). It asks for the boards,
+default `FlyingRCF4WingMini`. You can also run
+`python ama-field/ci/build_local.py [BOARD ...]`. It builds the working copy,
+uncommitted changes included. It uses the CI's Docker image
+(`ardupilot/ardupilot-dev-chibios:v0.1.3`) and `ama-field/ci/build_boards.sh`, so the
+overlays, trim tiers and file names are the same as a release. On Windows it runs in
+WSL, and Docker is needed in WSL or on Linux.
+
+The build happens in a Linux clone, `~/ama-field-build`, which keeps the submodules
+and the compiler cache. The first run clones it and builds everything, which takes
+a while; after that, only what changed is rebuilt. The results go to
+`ama-field-out/` in the repo root, as in CI:
+`files/ArduPlane-4.7.2_AMAFieldMode_local-<sha>[-dirty]_<board>.apj` and
+`_with_bl.hex`, plus `results/`, `features/` and the build logs in `logs/`.
+
 On 1 MB boards, check the build fits. The custom code is small, but ArduPilot's
 1 MB targets have little spare flash.
 
@@ -27,8 +43,10 @@ Release binaries are built by CI for the boards in `ama-field/ci/boards.txt` (se
 [Release CI](#release-ci)), with ArduPilot's standard 10-2020-q4-major toolchain.
 Releases up to v16 were built by hand for the **FlyingRC F4Wing Mini** only, with
 the xPack `arm-none-eabi-gcc` 10.3.1-2.3 toolchain; either toolchain works. On
-that board v17 uses 875,280 of 983,040 bytes (CI toolchain), 2,784 bytes more than
-v16 for the baro compensation, takeoff learning and rangefinder changes.
+that board v17 uses 880,232 of 983,040 bytes (CI toolchain, 102,808 free): about
+7.7 KB more than v16 for the baro compensation, the takeoff and touchdown learning
+and the rangefinder handling. The tightest board in `boards.txt`, the JHEMCU F405
+Wing, still fits at stock with 484 bytes free.
 
 **Baro compensation in your own build.** The field mode expects baro thrust and
 wind compensation (`AP_BARO_THST_COMP_ENABLED`, `HAL_BARO_WIND_COMP_ENABLED`).
@@ -260,7 +278,16 @@ printf 'undef AP_BARO_THST_COMP_ENABLED\ndefine AP_BARO_THST_COMP_ENABLED 0\nund
   - `alt`: AUTOLAND selection height
   - `rf=100 rfl=1`: simulated rangefinder with `RNGFND_LANDING` 1; `rfmax=3` for a
     small ToF sensor's range, `rfs=2.8` for a strong signal below 2.8 m
-    (`SIM_SONAR_STRONG`), `glitch=0.05` for weak random readings
+    (`SIM_SONAR_STRONG`), `glitch=0.05` for random 0.5-5 m spikes
+  - `rfprof=mt06|tfluna|sonar|lidar|highmount`: a simulated sensor profile, which
+    sets `RNGFND1_MIN`/`_MAX`/`_GNDCLR`, `RNGFND_LANDING` 1 and the test-only
+    `SIM_SONAR_HZ` (sample rate), `SIM_SONAR_STRONG`, `SIM_SONAR_GARB` (random
+    "valid" readings beyond the real range, like the MT-06) and `SIM_SONAR_POS_Z`
+    (mounting height). `drop=0.1` (`SIM_SONAR_DROP`) for samples with no data,
+    `rffail=eng` for a sensor that dies 0.5 s after it engages (`SIM_SONAR_FAIL`)
+  - `python3 ama-field/sitl/rf_matrix.py RUNDIR ...` tabulates rangefinder runs
+    against the simulator's truth: engagement height, flare source, touchdown
+    detection tier and delay, touchdown point, and landing-height steps
   - `thst` / `wcf`: simulated baro error from throttle (`SIM_BARO_THST`, Pa at full
     throttle) and airspeed (`SIM_BARO_WCF_FWD`)
   - `bts` / `bwcf` / `lrn`: `BARO1_THST_SCALE`, `BARO1_WCF_FWD`, `AUTOLAND_BAROLRN`
@@ -289,8 +316,8 @@ All in `ama-field/log-analysis/` (Python 3 + pymavlink):
 | `landing_trace.py LOG.BIN t0 t1` | Approach and flare trace: height vs demand, distance, speed, sink, pitch. |
 | `baro_throttle.py [--replay] [--models] LOG.BIN ...` | Baro error from throttle and airspeed: the takeoff run-up, near-ground flight against strong rangefinder readings, and airborne fits. Suggests `BARO1_THST_SCALE` and `BARO1_WCF_FWD` (current + increment). `--replay` runs the `AUTOLAND_BAROLRN` learning on each takeoff; `--models` compares throttle models. See [TUNING.md](TUNING.md#4-barometer-compensation). |
 | `baro_err.py LOG.BIN ...` | Baro error against strong rangefinder readings, by flight phase. |
-| `rf_gate_sim3.py LOG.BIN t0 t1` | Replays the rangefinder plausibility gate on a log. |
-| `rf_engage_replay.py LOG.BIN ...` | Rangefinder engagement height on each landing, the old (10 samples) and new (3 strong samples) rule, from the raw `RFSS` samples, with a 50 Hz estimate. |
+| `rf_gate_sim3.py LOG.BIN t0 t1` | Replays the rangefinder plausibility gate on a log (quality from `RFSS.Q`, `RNGFND1_MAX` from the log). |
+| `rf_engage_replay.py [--scan] LOG.BIN ...` | Rangefinder engagement on each landing from the raw `RFSS` samples: the stock rule, v17's 3 strong samples and the AUTOLAND-final consistency rule, with a check that each engagement is sustained. `--scan` stress-tests the rules over the whole flight. Sensor agnostic (`RFSS.Q`, or MT-06 strength / 255 in older logs). |
 | `params_of.py LOG.BIN NAME ...` | Parameter values recorded in a log. |
 
 These log messages are the most useful:
@@ -299,7 +326,15 @@ These log messages are the most useful:
 - `POS`, `GPS`, `ATT`;
 - `RCIN` / `RCOU`;
 - `PIDS`: ground steering;
-- `RFND`, and `RFSS` for raw TOFSense-F samples with signal strength;
+- `RFND`, and `RFSS` for raw rangefinder samples (TOFSense-F and Benewake I2C):
+  type, distance as reported (also for invalid samples), raw strength, sample status
+  and the 0-100% quality ArduPilot gets. Every valid sample below `RNGFND1_MAX`,
+  10 Hz otherwise;
+- `ALRF` (10 Hz on an AUTOLAND final): rangefinder distance, status, quality,
+  height, in range, consistent samples, hold state, correction, the landing height
+  and what the stock correction rule would give;
+- `TDET`: touchdown detection (tier, delay, landing height, vertical speed, last
+  good rangefinder reading);
 - `BTLN`: the baro learning on each takeoff (samples, top throttle, measured, old
   and new `BARO1_THST_SCALE`, baseline noise, result). It is logged whatever
   `LOG_BITMASK` is;
@@ -310,7 +345,7 @@ These log messages are the most useful:
 
 `RFSS` is a streaming message, so with MAVLink logging it is limited to
 `LOG_MAV_RATEMAX` (10 Hz on the example aircraft). The driver polls at 50 Hz and
-logs every sample below 5 m, 10 Hz above. To see every sample, for example on a
+logs every valid sample below `RNGFND1_MAX`, 10 Hz otherwise. To see every sample, for example on a
 bench test with a hand moved under the sensor, set `LOG_MAV_RATEMAX` 0 for that
 test.
 
@@ -327,10 +362,12 @@ test.
 | `ArduPlane/mode_rtl.cpp` | RTL to the runway circle. |
 | `ArduPlane/fence.cpp` | Bounce-back to CRUISE, FBWB or FBWA. |
 | `ArduPlane/Attitude.cpp` | Flare de-crab, and rollout steering gain. |
-| `ArduPlane/altitude.cpp`, `Plane.h` | Rangefinder plausibility gate against baro, with a bypass for a strong signal. A strong signal on 3 new samples in a row sets the rangefinder in range at once; other sensors and weak samples keep the stock 10 samples. |
+| `ArduPlane/altitude.cpp`, `Plane.h` | Rangefinder plausibility gate against baro, with a bypass for a strong signal (all modes). On an AUTOLAND final only (`rangefinder_autoland_rules()`): engagement by consistency with the EKF vertical speed, the rangefinder height measured from the wheels (`RNGFND1_GNDCLR` subtracted), the correction held below the minimum range or faded out after a failure, and the `ALRF` log. Everywhere else the stock 10-sample rule (v17's 3-strong-samples path is removed). |
 | `ArduPlane/commands_logic.cpp`, `AP_Arming_Plane.cpp` | Loiter-to-alt exit for the circuit; arming block until the pits reference exists. |
-| `libraries/AP_RangeFinder/AP_RangeFinder_TOFSenseF_I2C.*` | Reports signal strength as `signal_quality_pct`, and adds the `RFSS` log (every sample below 5 m, 10 Hz above). Polls at 50 Hz, the MT-06's output rate. |
-| `libraries/SITL/*`, `libraries/AP_Baro/AP_Baro_SITL.cpp`, `libraries/AP_RangeFinder/AP_RangeFinder_SITL.cpp` | Test only: `SIM_BARO_THST` (baro error proportional to the throttle output), `SIM_SONAR_STRONG` (signal quality for the SITL rangefinder, and weak glitches with `SIM_SONAR_GLITCH`). |
+| `libraries/AP_RangeFinder/AP_RangeFinder_TOFSenseF_I2C.*` | Reports signal strength as `signal_quality_pct` (strength / 255) and logs `RFSS`. Polls at 50 Hz, the MT-06's output rate. |
+| `libraries/AP_RangeFinder/AP_RangeFinder_Benewake_TFMiniPlus.*` | Reports `signal_quality_pct` from the strength (provisional mapping from the TF-Luna manual's repeatability table: 0 below 100 or from 32768, 100 × log10(strength / 100) otherwise), averages only valid samples, and logs `RFSS`. |
+| `libraries/AP_RangeFinder/AP_RangeFinder_Backend.*` | `log_raw_sample()`: the shared `RFSS` log. |
+| `libraries/SITL/*`, `libraries/AP_Baro/AP_Baro_SITL.cpp`, `libraries/AP_RangeFinder/AP_RangeFinder_SITL.cpp` | Test only: `SIM_BARO_THST` (baro error proportional to the throttle output), and for the SITL rangefinder `SIM_SONAR_STRONG` (signal quality), `SIM_SONAR_GARB`, `SIM_SONAR_HZ`, `SIM_SONAR_DROP`, `SIM_SONAR_FAIL`, and `SIM_SONAR_GLITCH` spikes. |
 | `libraries/AP_HAL_ChibiOS/hwdef/FlyingRCF4WingMini/`, `Tools/bootloaders/FlyingRCF4WingMini_bl.*`, `Tools/AP_Bootloader/board_types.txt` | FlyingRC F4Wing Mini board (board ID 1241). |
 
 Nothing changes unless `AUTOLAND_OPTIONS` has bits 1 and 2 set (value 6). Without
@@ -345,7 +382,9 @@ below 0.3 m/s and stays there for 1.5 s, at the first accelerometer spike (0.25 
 above 1 g) in that time if any. The accelerometer alone is not enough: in SITL the
 flare pull-up reaches 0.8 g above 1 g, more than a soft touchdown, but the sink
 continues after it. A bounce (EKF climb rate above 0.7 m/s, or the rangefinder 0.3 m
-up) waits for the next contact; 2 s down confirms. Stick input, a mode change, or
+up) waits for the next contact; 2 s down confirms. Elevator input (over 10 %), the
+throttle stick above 60 % with `THROTTLE_NUDGE` on (the stick only acts above half
+way, as a nudge, so 0–60 % is ignored), a mode change, or
 more than 15 m off the runway line rejects the landing. The float (aim point to
 touchdown) moves `AUTOLAND_TD_OFS` half way toward it (as is from 0; 0–50 m) with
 `set_and_notify`, and it is saved at disarm. It doesn't touch the landing in
@@ -373,7 +412,7 @@ v17 adds:
    hwdef changes
 8. `ArduPlane: learn BARO1_THST_SCALE on the takeoff run-up`
 9. `ArduPlane: learn AUTOLAND_TD_OFS from each AUTOLAND touchdown`
-10. `ArduPlane: engage the rangefinder after 3 strong samples`, with the 50 Hz
+10. `ArduPlane: sensor-agnostic rangefinder engagement and touchdown on AUTOLAND`, with the 50 Hz
     TOFSense-F polling
 11. `CI: baro compensation on every board, before the trim tiers`
 12. `AMA field: baro compensation docs, parameters and scripts`
@@ -405,7 +444,7 @@ example aircraft:
 | v14 | Flare de-crab (nose aligned with the runway). |
 | v15 | `AUTOLAND_DSC_ARC`. |
 | v16 | Integrator reset on TAKEOFF; `AUTOLAND_RO_GAIN`; one takeoff per arming. |
-| v17 (SITL-tested, not yet flown) | Baro thrust compensation from the forward motor, with wind compensation, on every board; `AUTOLAND_BAROLRN` learns `BARO1_THST_SCALE` on each takeoff run-up; `AUTOLAND_TDLRN` learns `AUTOLAND_TD_OFS` from each AUTOLAND touchdown; rangefinder in range after 3 strong samples; TOFSense-F polled at 50 Hz. First release built by CI, for every board in `boards.txt`. |
+| v17 (SITL-tested, not yet flown) | Baro thrust compensation from the forward motor, with wind compensation, on every board; `AUTOLAND_BAROLRN` learns `BARO1_THST_SCALE` on each takeoff run-up; `AUTOLAND_TDLRN` learns `AUTOLAND_TD_OFS` from each AUTOLAND touchdown; rangefinder handling for any sensor on the AUTOLAND final (engagement by consistency with the descent at any sample rate, correction held below the minimum range, tiered touchdown detection including a blind zone, wheel-height reference); signal quality and `RFSS` for Benewake I2C (TF-Luna, if type 25 detects it); TOFSense-F polled at 50 Hz. First release built by CI, for every board in `boards.txt`. |
 
 v9 was a ground throttle mapping for spring-centred throttle sticks, and was not
 kept.

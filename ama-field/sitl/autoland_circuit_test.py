@@ -17,6 +17,10 @@ usage: autoland_circuit_test.py <outdir> [key=val ...]
   alt=50 away=12                height/seconds of the GUIDED leg before AUTOLAND
                                 (= the height AUTOLAND is selected at)
   rf=100 rfl=1                  SITL rangefinder, RNGFND_LANDING
+  rfprof=tfluna                 rangefinder profile, sets RNGFND1_* and SIM_SONAR_* (RNGFND_LANDING 1):
+                                mt06, tfluna, sonar, lidar, highmount (see RF_PROFILES)
+  drop=0.1                      SIM_SONAR_DROP: rangefinder samples with no data
+  rffail=eng                    the rangefinder dies 0.5 s after "Rangefinder engaged"
   rfmax=3                       RNGFND1_MAX (default 6); 3 = a small ToF sensor outdoors
   rfs=2.8                       SIM_SONAR_STRONG: rangefinder reports a strong signal
                                 below 2.8 m, weak above (0/absent = no signal quality)
@@ -47,8 +51,27 @@ os.makedirs(outdir, exist_ok=True)
 os.chdir(outdir)
 left = math.radians(HOME[3] - 90)
 extra = os.path.join(outdir, 'extra.parm')
+# simulated rangefinder profiles (rfprof=): RNGFND1_MIN/_MAX/_GNDCLR as configured,
+# and how the simulated sensor behaves (SIM_SONAR_*). The SITL plane's sensor reads
+# 0.01 m on its wheels at its origin: SIM_SONAR_POS_Z mounts it higher, here 0.11 m
+# like the test aircraft (0.35 m for the high mount), and GNDCLR is set to that.
+RF_PROFILES = {
+    # name:      (min,  max, gndclr, Hz, strong (quality below this; 0 = none), garbage beyond, pos_z)
+    'mt06':      (0.05, 6,   0.11,   10, 3,   1, -0.10),
+    'tfluna':    (0.2,  8,   0.11,   50, 8,   0, -0.10),
+    'sonar':     (0.3,  2,   0.11,   10, 0,   0, -0.10),
+    'lidar':     (0.1,  40,  0.11,   20, 0,   0, -0.10),
+    'highmount': (0.2,  8,   0.35,   50, 8,   0, -0.34),
+}
 with open(extra, 'w') as f:
-    if opt.get('rf'):
+    if opt.get('rfprof') in RF_PROFILES:
+        rmin, rmax, clr, hz, strong, garb, posz = RF_PROFILES[opt['rfprof']]
+        f.write('RNGFND1_TYPE 100\nRNGFND1_ORIENT 25\nRNGFND_LANDING 1\n'
+                'RNGFND1_MIN %s\nRNGFND1_MAX %s\nRNGFND1_GNDCLR %s\n' % (rmin, rmax, clr))
+        f.write('SIM_SONAR_HZ %s\nSIM_SONAR_STRONG %s\nSIM_SONAR_GARB %s\nSIM_SONAR_POS_Z %s\n'
+                % (hz, strong, garb, posz))
+        f.write('SIM_SONAR_GLITCH %s\nSIM_SONAR_DROP %s\nSIM_SONAR_FAIL 0\n' % (opt.get('glitch', 0), opt.get('drop', 0)))
+    elif opt.get('rf'):
         f.write('RNGFND1_TYPE %s\nRNGFND1_MAX %s\nRNGFND1_MIN 0.05\nRNGFND1_ORIENT 25\nSIM_SONAR_GLITCH %s\n'
                 % (opt['rf'], opt.get('rfmax', 6), opt.get('glitch', 0)))
         f.write('SIM_SONAR_STRONG %s\n' % opt.get('rfs', 0))
@@ -71,6 +94,7 @@ rc = [1500, 1500, 1000, 1500, 1500, 1500, 1500, 1500]
 last_rc = 0.0
 phase = 'ground'
 last_yaw = [0.0]
+rf_failed = []
 
 def pump(seconds, cond=None):
     global last_rc
@@ -92,6 +116,16 @@ def pump(seconds, cond=None):
         elif t == 'STATUSTEXT':
             texts.append((phase, msg.text))
             print('  MSG:', msg.text, flush=True)
+            if opt.get('rffail') == 'eng' and 'Rangefinder engaged' in msg.text and not rf_failed:
+                # the sensor dies half a second (sim) after it was taken into use
+                rf_failed.append(time.time() + 0.5 / speedup)
+        if rf_failed and len(rf_failed) == 1 and time.time() >= rf_failed[0]:
+            rf_failed.append(True)
+            for _ in range(3):
+                m.mav.param_set_send(m.target_system, m.target_component, b'SIM_SONAR_FAIL', 1.0,
+                                     mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
+            texts.append((phase, 'TEST: rangefinder failed'))
+            print('  TEST: rangefinder failed', flush=True)
         if cond and cond(msg):
             return True
     return False
@@ -144,7 +178,7 @@ pump(15)
 params = dict(AUTOLAND_OPTIONS=int(opt.get('opts', 6)), AUTOLAND_SIDEGAP=int(opt.get('gap', 15)),
               AUTOLAND_WP_DIST=float(opt.get('wpd',100)), AUTOLAND_WP_ALT=float(opt.get('wpalt',12)), TKOFF_ALT=float(opt.get('tka',40)), TKOFF_DIST=120, WP_LOITER_RAD=30,
               RTL_ALTITUDE=60, RTL_RADIUS=0, THR_FAILSAFE=0, RTL_AUTOLAND=0, GROUND_STEER_ALT=5,
-              LAND_FLARE_ALT=float(opt.get('fa',3)), LAND_FLARE_SEC=float(opt.get('fs',2)), TECS_LAND_SINK=float(opt.get('ls',0.25)), LAND_PF_ALT=6, RNGFND_LANDING=int(opt.get('rfl', 0)),
+              LAND_FLARE_ALT=float(opt.get('fa',3)), LAND_FLARE_SEC=float(opt.get('fs',2)), TECS_LAND_SINK=float(opt.get('ls',0.25)), LAND_PF_ALT=6, RNGFND_LANDING=int(opt.get('rfl', 1 if opt.get('rfprof') in RF_PROFILES else 0)),
               NAVL1_DAMPING=float(opt.get('damp', 0.85)), TECS_SINK_MAX=float(opt.get('sink', 5)), NAVL1_PERIOD=float(opt.get('l1', 17)), ROLL_LIMIT_DEG=45, LEVEL_ROLL_LIMIT=float(opt.get('lvl',5)), AIRSPEED_CRUISE=float(opt.get('cruise',15)))
 if opt.get('slow', '1') == '1':
     params.update(AIRSPEED_MIN=12, AIRSPEED_CRUISE=15)

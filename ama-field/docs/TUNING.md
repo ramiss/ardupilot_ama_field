@@ -99,19 +99,70 @@ the centreline.
 
 The field mode doesn't need one.
 
-**With a downward rangefinder**: configure it, set `RNGFND_LANDING` 1, and check
-`RFND` in a log that it reads the ground correctly on the rollout. The plausibility
-gate in this firmware rejects readings that disagree with the baro, unless the
-sensor reports a strong signal, so bad readings at approach height don't trigger an
-early flare.
+**With a downward rangefinder**: any ArduPilot rangefinder works. Configure it, set
+`RNGFND_LANDING` 1, and set its three limits correctly, because the field mode
+uses only these, the status and (if reported) the signal quality:
 
-A sensor that reports signal strength (the TOFSense-F / MT-06 does) is taken into
-use after 3 strong readings in a row; *"Rangefinder engaged at"* tells you the
-height. For the rangefinder to decide the flare, the flare has to start inside its
-strong range. For an MT-06, keep `LAND_FLARE_ALT`, and `LAND_FLARE_SEC` × the final
-sink rate, at or below about 2–2.5 m. A shallow final (`AUTOLAND_DSC_ARC` 90, about
-2 m/s sink) does that with `LAND_FLARE_SEC` 1. On a steep final the flare starts
-above the sensor's range and the rangefinder only refines its end.
+- `RNGFND1_MIN` and `RNGFND1_MAX`: the sensor's specified range.
+- `RNGFND1_GNDCLR`: what it reads standing on its wheels, measured.
+
+**Mounting.** If the airframe allows it, mount the sensor so it sees the ground on
+the wheels: lens at least `RNGFND1_MIN` + 0.05 m above the ground. Set
+`RNGFND1_GNDCLR` to the measured reading. Touchdown is then detected from the
+reading reaching the ground clearance. If it can't (`RNGFND1_GNDCLR` below
+`RNGFND1_MIN`; you see *"Rangefinder can't see ground on wheels: blind-zone
+touchdown"* at arming), touchdown is detected from the range ending at the bottom,
+with the baro height under 1.5 m and the sink stopped.
+
+**How it is used on the AUTOLAND final:**
+
+- **Engagement.** The rangefinder is taken into use once its readings have followed
+  the aircraft's own descent for at least 0.2 s. The descent is the EKF vertical
+  speed. Random "valid" readings beyond a small sensor's range don't follow it.
+  - With a signal quality of 50% or more, 3 samples are enough and the check is
+    looser.
+  - Weak readings, or a sensor without a quality, need 6 samples in a row: 0.2 s at
+    50 Hz, 0.5 s at 10 Hz. Random readings can agree with the descent by chance
+    once or twice, never five times running.
+  - Below 20% quality a sample doesn't count.
+
+  *"Rangefinder engaged at"* tells you the height.
+- **The plausibility gate** also rejects weak readings that disagree badly with the
+  baro.
+- **Below the minimum range** the last correction is held, so the height doesn't
+  step back to the baro.
+- **If the sensor stops** working higher up, the correction fades out over 3 s.
+
+**Range decides who flares.** For the rangefinder to decide the flare, the flare
+has to start inside its *usable* range, which outdoors in sun over grass can be well
+short of `RNGFND1_MAX`. With an MT-06 (strong returns below about 2.5–3 m), keep
+`LAND_FLARE_ALT`, and `LAND_FLARE_SEC` × the final sink rate, at or below about
+2–2.5 m. A shallow final (`AUTOLAND_DSC_ARC` 90, about 2 m/s sink) does that with
+`LAND_FLARE_SEC` 1. On a steep final the flare starts above the sensor's range and
+the rangefinder only refines its end. If `RNGFND1_MAX` is below `LAND_FLARE_ALT` +
+1 m you see *"Rangefinder range below flare height: flare decided by baro"* at
+arming.
+
+**Measure the outdoor range, don't assume it.**
+
+1. On the first flight, fly low passes at idle over the runway at stepped heights
+   (2, 4, 6, 8 m).
+2. In the log, `RFSS` shows each raw sample with its quality (`Q`), and `ALRF` shows
+   the rangefinder on each AUTOLAND final.
+3. The height up to which `RFSS` still shows valid samples with a good quality is
+   your usable range.
+
+**TF-Luna (Benewake) over I2C.** On a board with no free UART:
+
+| | |
+|---|---|
+| Wiring | Pin 5 (configuration input) to ground for I2C mode. Pin 2 SDA, pin 3 SCL, 5 V and ground. |
+| Parameters | `RNGFND1_TYPE` 25 (BenewakeTFmini-I2C), `RNGFND1_ADDR` 16 (0x10), `RNGFND1_MIN` 0.2, `RNGFND1_MAX` 8, `RNGFND1_ORIENT` 25, `RNGFND1_GNDCLR` measured, `RNGFND_LANDING` 1. Reboot. |
+| Check | At boot, the message *"TFMiniPlus: found fw version …"*. Then a bench check: the rangefinder distance on Mission Planner's Status tab follows a hand or a board moved under the sensor. |
+| Not detected? | The type 25 driver speaks the TFmini Plus command frames over I2C. The TF-Luna manual documents a register map for I2C mode and the command frames for serial mode only, so type 25 may not detect it. Then a TF-Luna I2C driver is needed. |
+| Range | Rated 0.2–8 m at 90% reflectivity and 0.2–2.5 m at 10% (both at 90 klux). Green grass reflects strongly in near-infrared, so 4–6 m in sun is plausible, but measure it (above). |
+| Blind zone | 0.2 m minimum range: on most aircraft it can't see the ground on its wheels, and touchdown uses blind-zone detection. |
+| Quality | Benewake's strength is mapped to 0–100% (provisional): 0 below 100 (unreliable) and at 32768 and above (overexposed); 100 × log10(strength / 100) otherwise, so 50% at 316 and 100% from 1000. |
 
 **Without one**: `RNGFND_LANDING` 0. The flare starts from baro height either way.
 The main difference is that `AUTOLAND_RO_GAIN` starts when ArduPilot detects the
@@ -127,7 +178,7 @@ Work through these in order, making **one change per flight** and keeping the lo
 |---|---|---|
 | 1 | TAKEOFF, then fly FBWB and land manually | The roll tracks straight. *"Autoland direction="* is within a few degrees of the runway heading. The runway circle is on the far side. *"Baro: throttle scale ..."* during the roll (4.1). |
 | 2 | Fly toward the fence in FBWB | It turns back and announces *"FBWB resumed"*. Note how far past the fence it went. |
-| 3 | AUTOLAND from circuit height, with a hand on the override | The circuit stays on the far side, is level until the final turn, and lines up without crossing the centreline. Take over if it is going to land short or off the runway (that landing isn't learned). *"Autoland: touchdown ... TD_OFS ..."* after the touchdown (4.3). |
+| 3 | AUTOLAND from circuit height, with a hand on the override | The circuit stays on the far side, is level until the final turn, and lines up without crossing the centreline. Correct the line with aileron or rudder if needed (the landing is still learned). Take over if it is going to land short (that landing isn't learned). *"Autoland: touchdown ... TD_OFS ..."* after the touchdown (4.3). |
 | 4+ | Set `BARO1_WCF_FWD` (4.2), then refine the flare and rollout. The touchdown point follows by itself (4.3). | Use the tables below. |
 
 ---
@@ -229,9 +280,16 @@ down. With `AUTOLAND_TDLRN` 1 (the default), every AUTOLAND measures that.
   confirms it.
 - **The float** is the distance from the aim point to the touchdown, along the
   runway line.
-- **It is not learned** if you move the sticks or change mode between the start of
-  the final and 2 s after the touchdown, or if the touchdown is more than 15 m off
-  the runway line.
+- **Aileron and rudder corrections are fine**: they change the direction, not the
+  float.
+- **The throttle stick can rest anywhere from 0 to 60 %.** In AUTOLAND it does
+  nothing below half way (stock `THROTTLE_NUDGE`); above that it adds throttle in
+  proportion. The learning ignores 0–60 %, so wherever the stick rests, any
+  reduction, and a bump while using the rudder don't matter.
+- **It is not learned** if, between the start of the final and 2 s after the
+  touchdown, you move the elevator stick (over 10 %), raise the throttle stick above
+  60 %, or change mode. It is also not learned if the touchdown is more than 15 m
+  off the runway line.
 - **Each landing moves it half way** to the float it measured, limited to 0–50 m, so
   one gusty landing can't move it far. (If `AUTOLAND_TD_OFS` is 0, the first
   measurement is used as it is.)

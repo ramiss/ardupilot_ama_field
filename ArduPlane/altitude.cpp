@@ -681,6 +681,12 @@ float Plane::lookahead_adjustment(void)
  */
 float Plane::rangefinder_correction(void)
 {
+#if MODE_AUTOLAND_ENABLED
+    if (rangefinder_autoland_rules() && !rangefinder_state.in_range && rf_land.hold != RFHold::NONE &&
+        rangefinder_use(RangeFinderUse::TAKEOFF_LANDING)) {
+        return rangefinder_autoland_held_correction();
+    }
+#endif
     if (millis() - rangefinder_state.last_correction_time_ms > 5000) {
         // we haven't had any rangefinder data for 5s - don't use it
         return 0;
@@ -764,6 +770,15 @@ void Plane::rangefinder_height_update(void)
         }
     }
 
+#if MODE_AUTOLAND_ENABLED
+    if (range_ok && rangefinder_autoland_rules()) {
+        // custom: on an AUTOLAND final the height is the wheels' height, so the
+        // flare and touchdown are the same whatever the sensor's mounting height:
+        // RNGFNDx_GNDCLR is what the sensor reads standing on its wheels
+        corrected_distance -= rangefinder.ground_clearance_orient(orientation);
+    }
+#endif
+
     if (range_ok && ahrs.home_is_set()) {
         if (!rangefinder_state.have_initial_reading) {
             rangefinder_state.have_initial_reading = true;
@@ -779,31 +794,24 @@ void Plane::rangefinder_height_update(void)
         // catch Lidars that are giving a constant range, either due
         // to misconfiguration or a faulty sensor
         if (rangefinder_state.in_range_count < 10) {
-            const bool new_sample = !is_equal(distance, rangefinder_state.last_distance);
-            if (new_sample &&
-                fabsf(rangefinder_state.initial_range - distance) > 0.05f * rangefinder.max_distance_orient(rangefinder_orientation())) {
-                rangefinder_state.in_range_count++;
-            }
-            // custom: a sensor that reports a strong signal (quality >= 50%)
-            // on RANGEFINDER_STRONG_SAMPLES new samples in a row is live and
-            // seeing the ground, so it is in range without the 10 samples
-            // (1 s on a 10 Hz sensor) and the 5% change from the first reading.
-            // Sensors without a quality, and weak samples, use the rule above.
-            static constexpr uint8_t RANGEFINDER_STRONG_SAMPLES = 3;
-            if (new_sample) {
-                if (rangefinder.signal_quality_pct_orient(orientation) >= 50) {
-                    rangefinder_strong_count++;
-                } else {
-                    rangefinder_strong_count = 0;
+#if MODE_AUTOLAND_ENABLED
+            if (rangefinder_autoland_rules()) {
+                // custom: on an AUTOLAND final, in range once the samples have
+                // agreed with the aircraft's own vertical motion for 0.2 s
+                if (rangefinder_consistent(orientation, distance, corrected_distance)) {
+                    rangefinder_state.in_range_count = 10;
                 }
-            }
-            if (fabsf(rangefinder_state.last_distance - distance) > rangefinder.max_distance_orient(rangefinder_orientation())*0.2) {
-                // changes by more than 20% of full range will reset counter
-                rangefinder_state.in_range_count = 0;
-                rangefinder_strong_count = 0;
-            }
-            if (rangefinder_strong_count >= RANGEFINDER_STRONG_SAMPLES) {
-                rangefinder_state.in_range_count = 10;
+            } else
+#endif
+            {
+                if (!is_equal(distance, rangefinder_state.last_distance) &&
+                    fabsf(rangefinder_state.initial_range - distance) > 0.05f * rangefinder.max_distance_orient(rangefinder_orientation())) {
+                    rangefinder_state.in_range_count++;
+                }
+                if (fabsf(rangefinder_state.last_distance - distance) > rangefinder.max_distance_orient(rangefinder_orientation())*0.2) {
+                    // changes by more than 20% of full range will reset counter
+                    rangefinder_state.in_range_count = 0;
+                }
             }
         } else {
             rangefinder_state.in_range = true;
@@ -828,9 +836,12 @@ void Plane::rangefinder_height_update(void)
         rangefinder_state.last_distance = distance;
     } else {
         rangefinder_state.in_range_count = 0;
-        rangefinder_strong_count = 0;
         rangefinder_state.in_range = false;
     }
+
+#if MODE_AUTOLAND_ENABLED
+    rangefinder_autoland_update(orientation, distance, range_ok);
+#endif
 
     if (rangefinder_state.in_range) {
         // If not using terrain data, we expect zero correction when our height above target is equal to our rangefinder measurement
@@ -866,9 +877,151 @@ void Plane::rangefinder_height_update(void)
                 memset(&rangefinder_state, 0, sizeof(rangefinder_state));
             }
         }
-        
+
     }
 }
+
+#if MODE_AUTOLAND_ENABLED
+/*
+  custom (AMA field mode): rangefinder rules that only apply on an AUTOLAND
+  final (flight stage LAND). Everywhere else the stock rules apply.
+ */
+bool Plane::rangefinder_autoland_rules(void) const
+{
+    return control_mode == &mode_autoland && flight_stage == AP_FixedWing::FlightStage::LAND;
+}
+
+/*
+  engagement: a new sample counts if it agrees with the previous one plus the
+  aircraft's own vertical motion (EKF vertical speed x time between samples;
+  heights tilt-corrected). In range once the agreeing run spans at least
+  0.18 s, so the same at 10 Hz and 250 Hz, with at least 3 samples if all have
+  a quality of 50% or more, else 6 (2 and 5 agreements in a row).
+  - no quality value needed: random "valid" readings beyond a sensor's real
+    range don't follow the descent, so they keep restarting the run
+  - tolerance: 0.3 m + 0.5 m/s x dt at quality >= 50%, else 0.1 m + 0.3 m/s x dt;
+    quality below 20% doesn't count
+  - a repeated identical value doesn't count (stock anti-stuck check)
+ */
+bool Plane::rangefinder_consistent(enum Rotation orientation, float distance, float height)
+{
+    const uint32_t sample_ms = rangefinder.last_reading_ms(orientation);
+    if (sample_ms == rf_land.last_sample_ms) {
+        // no new sample since the last call
+        return false;
+    }
+    const float dt = (sample_ms - rf_land.last_sample_ms) * 0.001f;
+    rf_land.last_sample_ms = sample_ms;
+    if (is_equal(distance, rangefinder_state.last_distance)) {
+        return false;
+    }
+    const int8_t quality = rangefinder.signal_quality_pct_orient(orientation);
+    if (quality >= 0 && quality < 20) {
+        rf_land.count = 0;
+        return false;
+    }
+    Vector3f vel;
+    if (!ahrs.get_velocity_NED(vel)) {
+        rf_land.count = 0;
+        return false;
+    }
+    // sensor noise, plus EKF vertical speed error over dt
+    const bool strong = quality >= 50;
+    const float tolerance = strong ? (0.3f + 0.5f * dt) : (0.1f + 0.3f * dt);
+    const float predicted = rf_land.last_height - vel.z * dt;
+    if (rf_land.count == 0 || dt > 0.5f || fabsf(height - predicted) > tolerance) {
+        // start a new run with this sample
+        rf_land.count = 1;
+        rf_land.start_ms = sample_ms;
+        rf_land.weak_in_run = false;
+    } else if (rf_land.count < 255) {
+        rf_land.count++;
+    }
+    rf_land.weak_in_run |= !strong;
+    rf_land.last_height = height;
+    // a run with any weak or no-quality sample needs 6 samples: random readings
+    // agree with the descent by chance now and then, never 5 times in a row
+    return rf_land.count >= (rf_land.weak_in_run ? 6 : 3) && sample_ms - rf_land.start_ms >= 180;
+}
+
+/*
+  leaving range near the ground: once the rangefinder has been in use on the
+  final and its range ends (status OutOfRangeLow, NoData or otherwise not
+  Good), keep the last correction, so the landing height doesn't step back
+  to the baro:
+  - last Good reading within RNGFNDx_MIN + 0.3 m and under 1 s before:
+    the sensor's minimum range or blind zone: hold for the rest of the landing
+  - anywhere else (sensor failed, out of range high): hold 1 s, then fade to
+    the baro over 3 s, instead of stock's full correction for 5 s then a step
+ */
+void Plane::rangefinder_autoland_update(enum Rotation orientation, float distance, bool range_ok)
+{
+    const uint32_t now_ms = millis();
+    if (!rangefinder_autoland_rules()) {
+        memset(&rf_land, 0, sizeof(rf_land));
+        return;
+    }
+    if (!range_ok) {
+        // an invalid or rejected sample restarts the engagement run
+        rf_land.count = 0;
+    }
+    if (rangefinder.status_orient(orientation) == RangeFinder::Status::Good) {
+        rf_land.last_good_ms = now_ms;
+        rf_land.last_good_dist = distance;
+    }
+    if (rangefinder_state.in_range) {
+        rf_land.hold = RFHold::NONE;
+    } else if (rangefinder_state.in_use && rf_land.hold == RFHold::NONE) {
+        const bool near_min = rf_land.last_good_ms != 0 && now_ms - rf_land.last_good_ms < 1000 &&
+                              rf_land.last_good_dist <= rangefinder.min_distance_orient(orientation) + 0.3f;
+        rf_land.hold = near_min ? RFHold::NEAR_GROUND : RFHold::FADE;
+    }
+
+#if HAL_LOGGING_ENABLED
+    if (now_ms - rf_land.last_log_ms >= 100) {
+        rf_land.last_log_ms = now_ms;
+        const float hat = height_above_target();
+        const float corr = rangefinder_correction();
+        // what stock would apply: the correction for 5 s after the last update
+        const float stock_corr = (now_ms - rangefinder_state.last_correction_time_ms > 5000) ? 0 : rangefinder_state.correction;
+        // @LoggerMessage: ALRF
+        // @Description: AUTOLAND final: rangefinder engagement and landing height
+        // @Field: TimeUS: Time since system startup
+        // @Field: D: raw rangefinder distance
+        // @Field: St: rangefinder status (0 NotConnected, 1 NoData, 2 OutOfRangeLow, 3 OutOfRangeHigh, 4 Good)
+        // @Field: Q: signal quality (-1 unknown)
+        // @Field: RH: rangefinder height (tilt corrected)
+        // @Field: InR: rangefinder in range
+        // @Field: Cnt: consistent samples in the current run
+        // @Field: Hold: 0 none, 1 holding near the ground, 2 fading to baro
+        // @Field: Corr: correction applied
+        // @Field: LH: landing height (height above target minus correction)
+        // @Field: LHS: landing height with the stock correction rule
+        // @Field: VZ: EKF vertical speed, down positive
+        Vector3f vel;
+        if (!ahrs.get_velocity_NED(vel)) {
+            vel.zero();
+        }
+        AP::logger().WriteStreaming("ALRF", "TimeUS,D,St,Q,RH,InR,Cnt,Hold,Corr,LH,LHS,VZ",
+                                    "sm-%m---mmmn", "F0--0---000-", "QfBbfBBBffff",
+                                    AP_HAL::micros64(), distance, uint8_t(rangefinder.status_orient(orientation)),
+                                    rangefinder.signal_quality_pct_orient(orientation),
+                                    rangefinder_state.height_estimate, uint8_t(rangefinder_state.in_range),
+                                    rf_land.count, uint8_t(rf_land.hold), corr, hat - corr, hat - stock_corr, vel.z);
+    }
+#endif
+}
+
+float Plane::rangefinder_autoland_held_correction(void) const
+{
+    if (rf_land.hold == RFHold::NEAR_GROUND) {
+        return rangefinder_state.correction;
+    }
+    // FADE: full for 1 s after the last update, then linearly to 0 over 3 s
+    const float t = (millis() - rangefinder_state.last_correction_time_ms) * 0.001f;
+    return rangefinder_state.correction * constrain_float(1.0f - (t - 1.0f) / 3.0f, 0.0f, 1.0f);
+}
+#endif  // MODE_AUTOLAND_ENABLED
 #endif  // AP_RANGEFINDER_ENABLED
 
 /*

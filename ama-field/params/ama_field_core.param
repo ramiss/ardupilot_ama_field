@@ -22,7 +22,8 @@ AUTOLAND_RO_GAIN,1
 # flare) is deliberately not set here: the firmware default is a typical float, 20 m
 # (30 m on a board without baro compensation), and AUTOLAND_TDLRN refines it. If an
 # older setup saved 0, reset it to the default. Allow for up to 50 m in the fence.
-# learn AUTOLAND_TD_OFS on every AUTOLAND without stick input, saved at disarm
+# learn AUTOLAND_TD_OFS on every AUTOLAND without elevator input or the throttle stick
+# above 60% (0-60% is ignored), saved at disarm
 AUTOLAND_TDLRN,1
 AUTOLAND_DIR_OFF,0
 AUTOLAND_CLIMB,0

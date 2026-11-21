@@ -2,6 +2,30 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "AMA field: Build locally",
+            "detail": "Builds the working copy (uncommitted changes included) with the release CI's Docker image and build script, in WSL; output in ama-field-out/",
+            "type": "process",
+            "command": "python3",
+            "windows": {
+                "command": "python"
+            },
+            "args": [
+                "${workspaceFolder}/ama-field/ci/build_local.py",
+                "${input:amaFieldBoards}"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "AMA field: Publish all builds",
             "detail": "Asks for a tag (ama-field-v<N>), tags the pushed ama-field-4.7.2 commit and pushes the tag; CI builds every board and publishes the GitHub Release",
             "type": "process",
@@ -22,6 +46,14 @@
                 "clear": true
             },
             "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "amaFieldBoards",
+            "type": "promptString",
+            "description": "Board(s) to build, space separated (hwdef names, see ama-field/ci/boards.txt)",
+            "default": "FlyingRCF4WingMini"
         }
     ]
 }

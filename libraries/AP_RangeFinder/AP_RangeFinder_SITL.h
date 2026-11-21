@@ -35,6 +35,7 @@ protected:
     }
 
     uint8_t _instance;
+    uint32_t last_sample_ms;   // SIM_SONAR_HZ
 
 };
 

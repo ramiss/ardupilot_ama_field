@@ -32,7 +32,8 @@ AP_RangeFinder_SITL::AP_RangeFinder_SITL(RangeFinder::RangeFinder_State &_state,
  */
 void AP_RangeFinder_SITL::update(void)
 {
-    const float dist = AP::sitl()->get_rangefinder(_instance);
+    SITL::SIM *sitl = AP::sitl();
+    const float dist = sitl->get_rangefinder(_instance);
 
     // nan distance means nothing is connected
     if (isnan(dist) || isinf(dist)) {
@@ -40,23 +41,48 @@ void AP_RangeFinder_SITL::update(void)
         return;
     }
 
-    state.distance_m = MAX(0, dist);
-    state.last_reading_ms = AP_HAL::millis();
-
-    // SIM_SONAR_STRONG: signal quality like a small ToF sensor outdoors,
-    // with SIM_SONAR_GLITCH giving weak random readings
-    const float strong_m = AP::sitl()->sonar_strong;
-    if (is_positive(strong_m)) {
-        const float glitch = AP::sitl()->sonar_glitch;
-        if (is_positive(glitch) && glitch >= (rand_float() + 1.0f) * 0.5f) {
-            state.distance_m = 3.5f + 1.5f * rand_float();
-            state.signal_quality_pct = 20;
-        } else {
-            state.signal_quality_pct = (state.distance_m < strong_m) ? 100 : 20;
-        }
-    } else {
-        state.signal_quality_pct = RangeFinder::SIGNAL_QUALITY_UNKNOWN;
+    // custom test options (SIM_SONAR_*), to simulate different sensors
+    const uint32_t now_ms = AP_HAL::millis();
+    if (sitl->sonar_fail != 0) {
+        // a sensor that died
+        set_status(RangeFinder::Status::NoData);
+        return;
     }
+    if (is_positive(sitl->sonar_hz.get()) && now_ms - last_sample_ms < uint32_t(1000.0f / sitl->sonar_hz)) {
+        // between samples of a slower sensor: keep the last one
+        return;
+    }
+    last_sample_ms = now_ms;
+    const float drop = sitl->sonar_drop;
+    if (is_positive(drop) && drop >= (rand_float() + 1.0f) * 0.5f) {
+        set_status(RangeFinder::Status::NoData);
+        return;
+    }
+
+    float d = MAX(0, dist);
+    int8_t quality = RangeFinder::SIGNAL_QUALITY_UNKNOWN;
+    const float strong_m = sitl->sonar_strong;
+    const float glitch = sitl->sonar_glitch;
+    if (is_positive(glitch) && glitch >= (rand_float() + 1.0f) * 0.5f) {
+        // a spike: random 0.5-5m, weak if the sensor reports a quality
+        d = 0.5f + 4.5f * (rand_float() + 1.0f) * 0.5f;
+        quality = is_positive(strong_m) ? 20 : RangeFinder::SIGNAL_QUALITY_UNKNOWN;
+    } else if (is_positive(strong_m)) {
+        // SIM_SONAR_STRONG: signal quality like a small ToF sensor outdoors
+        if (d < strong_m) {
+            quality = 100;
+        } else if (sitl->sonar_garb != 0) {
+            // beyond its real range: random "valid" 2-5m readings, like the MT-06
+            d = 2.0f + 3.0f * (rand_float() + 1.0f) * 0.5f;
+            quality = int8_t(30 + 15 * (rand_float() + 1.0f) * 0.5f);
+        } else {
+            quality = 20;
+        }
+    }
+
+    state.distance_m = d;
+    state.signal_quality_pct = quality;
+    state.last_reading_ms = now_ms;
 
     // update range_valid state based on distance measured
     update_status();

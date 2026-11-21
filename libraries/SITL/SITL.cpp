@@ -615,10 +615,37 @@ const AP_Param::GroupInfo SIM::var_info3[] = {
 
     // @Param: SONAR_STRONG
     // @DisplayName: SITL rangefinder strong-signal distance
-    // @Description: SITL rangefinder (RNGFND1_TYPE 100) reports a signal quality: 100% below this distance, 20% above it, like a small ToF sensor outdoors. With SIM_SONAR_GLITCH, glitched samples read a random 2-5m with 20% quality. 0 = no signal quality reported (stock).
+    // @Description: SITL rangefinder (RNGFND1_TYPE 100) reports a signal quality: 100% below this distance, 20% above it, like a small ToF sensor outdoors (see SIM_SONAR_GARB). SIM_SONAR_GLITCH on this rangefinder gives random 0.5-5m spikes, with 20% quality if a quality is reported. 0 = no signal quality reported (stock).
     // @Units: m
     // @User: Advanced
     AP_GROUPINFO("SONAR_STRONG", 45, SIM,  sonar_strong, 0),
+
+    // @Param: SONAR_HZ
+    // @DisplayName: SITL rangefinder sample rate
+    // @Description: Test only: SITL rangefinder (RNGFND1_TYPE 100) produces new samples at this rate, holding the last one in between. 0 = a new sample on every update (stock).
+    // @Units: Hz
+    // @User: Advanced
+    AP_GROUPINFO("SONAR_HZ", 46, SIM,  sonar_hz, 0),
+
+    // @Param: SONAR_GARB
+    // @DisplayName: SITL rangefinder garbage beyond range
+    // @Description: Test only: with SIM_SONAR_STRONG set, beyond that distance the SITL rangefinder reports random "valid" readings of 2-5m with 30-45% quality (like a small ToF sensor outdoors above its real range), instead of the true distance with 20% quality.
+    // @Values: 0:Off,1:On
+    // @User: Advanced
+    AP_GROUPINFO("SONAR_GARB", 47, SIM,  sonar_garb, 0),
+
+    // @Param: SONAR_DROP
+    // @DisplayName: SITL rangefinder dropout probability
+    // @Description: Test only: probability (0-1) that a SITL rangefinder sample has no data.
+    // @User: Advanced
+    AP_GROUPINFO("SONAR_DROP", 48, SIM,  sonar_drop, 0),
+
+    // @Param: SONAR_FAIL
+    // @DisplayName: SITL rangefinder failure
+    // @Description: Test only: 1 = the SITL rangefinder stops giving data (a sensor that dies).
+    // @Values: 0:Working,1:Dead
+    // @User: Advanced
+    AP_GROUPINFO("SONAR_FAIL", 49, SIM,  sonar_fail, 0),
 
     // @Group: ARSPD_
     // @Path: ./SITL_Airspeed.cpp

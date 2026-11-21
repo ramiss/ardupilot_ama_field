@@ -80,7 +80,7 @@ def load(path):
             if getattr(x, 'Instance', 0) == 0:
                 D[t].append((T, x.Dist, x.Stat, getattr(x, 'Quality', -1)))
         elif t == 'RFSS':
-            D[t].append((T, x.D, x.Str, x.St))
+            D[t].append((T, x.D, rfss_quality(x), x.St))
         elif t == 'MODE':
             D[t].append((T, x.Mode))
         elif t == 'RCOU':
@@ -167,10 +167,19 @@ def takeoff_rolls(D):
     return out
 
 
+def rfss_quality(x):
+    """signal quality 0-100% of an RFSS sample: the logged Q, or for older logs
+    (TOFSense-F only, no Q) the MT-06 strength / 255 as its driver reports it"""
+    q = getattr(x, 'Q', None)
+    if q is not None:
+        return q
+    return min(100, x.Str * 100 // 255) if x.St == 1 else 0
+
+
 def strong_rf(D):
-    """(t, distance) of strong rangefinder samples: RFSS strength >= 128, or RFND quality >= 50"""
+    """(t, distance) of strong rangefinder samples: quality >= 50% (RFSS, or RFND with a quality)"""
     if D['RFSS']:
-        return [(s[0], s[1]) for s in D['RFSS'] if s[3] == 1 and s[2] >= 128]
+        return [(s[0], s[1]) for s in D['RFSS'] if s[3] == 1 and s[2] >= 50]
     return [(r[0], r[1]) for r in D['RFND'] if r[2] == 4 and r[3] >= 50]
 
 

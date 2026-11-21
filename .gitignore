@@ -115,6 +115,8 @@ GTAGS
 .vscode/*
 !.vscode/extensions.json
 !.vscode/tasks.json
+# AMA field release / local build output
+/ama-field-out/
 /.history
 Parameters.html
 Parameters.md

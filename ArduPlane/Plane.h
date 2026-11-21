@@ -219,8 +219,29 @@ private:
 
 #if AP_RANGEFINDER_ENABLED
     AP_FixedWing::Rangefinder_State rangefinder_state;
-    // consecutive new samples with a strong signal (rangefinder_height_update)
-    uint8_t rangefinder_strong_count;
+#if MODE_AUTOLAND_ENABLED
+    // custom (AMA field mode): rangefinder on an AUTOLAND final (altitude.cpp)
+    enum class RFHold : uint8_t {
+        NONE = 0,
+        NEAR_GROUND = 1,    // range ended near the sensor's minimum: hold the correction
+        FADE = 2,           // range ended anywhere else: fade the correction to baro
+    };
+    struct {
+        uint32_t last_sample_ms;    // sensor time of the last sample seen
+        uint32_t start_ms;          // first sample of the current consistent run
+        float last_height;          // tilt-corrected height of the last sample
+        uint8_t count;              // samples in the current consistent run
+        bool weak_in_run;           // a sample with quality below 50% (or unknown) in the run
+        uint32_t last_good_ms;      // last Good status
+        float last_good_dist;       // raw distance then
+        RFHold hold;
+        uint32_t last_log_ms;
+    } rf_land;
+    bool rangefinder_autoland_rules(void) const;
+    bool rangefinder_consistent(enum Rotation orientation, float distance, float height);
+    void rangefinder_autoland_update(enum Rotation orientation, float distance, bool range_ok);
+    float rangefinder_autoland_held_correction(void) const;
+#endif
 
     /*
       orientation of rangefinder to use for landing

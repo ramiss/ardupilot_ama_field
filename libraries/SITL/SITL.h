@@ -210,6 +210,10 @@ public:
     AP_Float sonar_scale; // meters per volt
     AP_Int8 sonar_rot;  // from rotations enumeration
     AP_Float sonar_strong; // SITL rangefinder: strong signal below this distance, 0 = no signal quality
+    AP_Float sonar_hz;     // SITL rangefinder sample rate, 0 = every update
+    AP_Int8 sonar_garb;    // SITL rangefinder: random "valid" readings beyond SIM_SONAR_STRONG
+    AP_Float sonar_drop;   // SITL rangefinder: probability of a sample with no data
+    AP_Int8 sonar_fail;    // SITL rangefinder: 1 = dead (no data)
 
     AP_Float drift_speed; // degrees/second/minute
     AP_Float drift_time;  // period in minutes
