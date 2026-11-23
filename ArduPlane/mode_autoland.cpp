@@ -606,7 +606,7 @@ void ModeAutoLand::touchdown_update(void)
 #if HAL_LOGGING_ENABLED
     bool rf_active;
     // @LoggerMessage: TDET
-    // @Description: AUTOLAND touchdown detected (rollout steering, touchdown learning)
+    // @Description: AUTOLAND touchdown detected (rollout steering, touchdown report)
     // @Field: TimeUS: Time since system startup
     // @Field: Tier: 1 rangefinder sees the ground, 2 rangefinder blind zone, 3 not flying (no usable rangefinder)
     // @Field: Dly: time from the condition starting to the detection

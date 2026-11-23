@@ -37,8 +37,11 @@ aircraft, a Freewing Pandora. Its settings are included only as a
 **Minimum hardware**
 
 - **An ArduPilot flight controller that runs ArduPlane 4.7**, with its barometer. See list of boards and compiled builds on the Releases tab.
-  Every ArduPilot board has one. If the fuselage is pressurised by the prop wash,
-  vent it (see [Limitations](#10-limitations-and-safety-notes)).
+  Every ArduPilot board has one.
+- **A fuselage vent** if the flight controller is inside the fuselage: any
+  fuselage that air can get into needs an exit opening of at least 1 square inch,
+  ideally more, behind the flight controller, wherever the motor is (see
+  [Fuselage vent](#fuselage-vent-required)).
 - **GPS**: for the pits reference, the roll start (landing point) and the runway
   direction.
 - **Compass**: required. ArduPlane can fly without one, but the field mode can't.
@@ -229,9 +232,8 @@ take off with TAKEOFF.
    far side of the runway line, so the turn can't overshoot toward the pits; on the
    final the line is tracked with 0.6 × `NAVL1_PERIOD`, so the aircraft is on the
    centreline early in the final instead of converging over most of it. This
-   replaces both the stock behaviour (diving
-   at `TECS_SINK_MAX` straight after the turn) and v16/v17's, where the aircraft
-   started the final about 5 m above its glide path and dived to catch it.
+   replaces the stock behaviour of diving at `TECS_SINK_MAX` straight after the
+   turn.
 5. **Flare.** The rudder points the nose down the runway, removing the crosswind
    crab, instead of steering the ground track. The touchdown aim is
    `AUTOLAND_TD_OFS` short of the roll start; the float after the flare carries the
@@ -282,7 +284,48 @@ aircraft at ~14 m/s; more for faster aircraft).
 | **Rudder**, ideally with a **steerable nose or tail wheel** | Ground steering on the roll, flare de-crab and rollout steering. A flying wing without a rudder gets the circuit, but none of the steering behaviour. |
 | **Any ArduPilot board that runs ArduPlane 4.7** | The features are in ArduPlane itself, not in a board definition, and add only a little flash. |
 | Downward **rangefinder** (optional) | Refines touchdown detection and the flare. Any ArduPilot rangefinder works: the field mode uses only its `RNGFND1_MIN`, `RNGFND1_MAX` and `RNGFND1_GNDCLR`, its status and, if it reports one, its signal quality. **Range matters:** a sensor that really reaches 4 m or more outdoors (a Benewake TF-Luna, or a longer-range lidar or radar) lets the rangefinder decide the flare on any final; a small ToF sensor like the MicoAir MT-06 only engages at about 2.5–3 m. A **minimum range** above the sensor's height on the wheels (the TF-Luna's 0.2 m) is handled by blind-zone touchdown detection. See [TUNING.md 2.4](ama-field/docs/TUNING.md#24-rangefinder-or-not) and [section 10](#10-limitations-and-safety-notes). |
+| **Fuselage vent** (board inside the fuselage) | Any fuselage that air can get into needs an exit of at least 1 square inch, ideally more, behind the flight controller, wherever the motor is. Without it the baro reads metres wrong. See [Fuselage vent](#fuselage-vent-required). |
 | Airspeed sensor (optional) | Not needed; the test aircraft had none. |
+
+### Fuselage vent (required)
+
+**Any fuselage that air can get into must also let it out.** If the flight
+controller sits inside the fuselage, give it an exit opening of **at least 1 square
+inch (6.5 cm²), ideally more, behind (aft of) the flight controller**. This applies
+wherever the motor and prop are: tractor, pusher or twin.
+
+- **Why:** air comes in through every opening that faces the airflow: the cowling
+  and motor mount, cooling inlets, hatch and canopy gaps, servo and wheel cutouts.
+  At flying speed that ram air pressurises the cabin on its own, and a prop in front
+  of an opening adds its wash. The barometer reads the cabin pressure as a lower
+  altitude, and every height in the circuit, the final and the flare comes from the
+  barometer.
+- **On the example aircraft** (Freewing Pandora) the closed fuselage made the baro
+  read about 4 m low at full throttle standing still. With one opening cut behind
+  the flight controller, a run-up to 61% throttle moved it by 0.07 m, and it stayed
+  within about 0.5 m for the whole flight.
+- **Size and place:**
+  - make the exit at least as large as the openings letting air in, and never less
+    than 1 square inch; several smaller openings add up;
+  - put it behind the flight controller, so air flows in, past the board and out;
+  - face it aft or to the side, out of the prop wash, never forward into the
+    airflow.
+- **Not a fix:** foam over the baro chip, because the pressure is the same
+  throughout the fuselage. Leave `BARO1_THST_SCALE` and `BARO1_WCF_ENABLE` at 0:
+  the field mode relies on a vented fuselage, not on software compensation.
+- **Check it before the first AUTOLAND:**
+  - **Run-up:** restrain the aircraft, keep clear of the prop, and with the hatches
+    and cowl as flown, hold 0, 50 and 100% throttle for a few seconds each while
+    watching the altitude in Mission Planner. It should stay within about ±0.5 m.
+  - **In flight:** the run-up only shows the prop wash, not the ram air at flying
+    speed (on a pusher it shows almost nothing). With a rangefinder, the log's
+    `ALRF.Corr` on each AUTOLAND final is the baro error and should stay within
+    about ±1 m. Without one, compare the altitude on a fast low pass with your eye
+    or a known height.
+  - If the altitude drops with throttle or speed, open the vent further.
+
+Flying wings and open-frame aircraft with the board in free air don't need a vent,
+but the same checks apply.
 
 **Airframe types**
 
@@ -420,7 +463,7 @@ automatically.
 |---|---|---|---|---|
 | `AUTOLAND_SIDEGAP` | 0 | 0–100 m | 5–15 | Gap between the extended centreline and the near edge of the base circle. The runway circle uses this + 10 m. |
 | `AUTOLAND_DSC_ARC` | 0 | 0–270° | 150–180 | Degrees before lined up at which the aircraft starts the circle descent (at least 90 with `AUTOLAND_FNL_HGT` set). 180 = as the turn from downwind begins. 0 = level until lined up. |
-| `AUTOLAND_FNL_HGT` | 8 m | 0–50 m | 6–10 | Height at the start of the final, reached 60° before the end of the turn and held level to the final. 0 = one continuous glide from the descent start (v16/v17 behaviour). |
+| `AUTOLAND_FNL_HGT` | 8 m | 0–50 m | 6–10 | Height at the start of the final, reached 60° before the end of the turn and held level to the final. 0 = one continuous glide from the descent start over the rest of the turn and the final. |
 | `AUTOLAND_RO_GAIN` | 1.0 | 1–5 | 1–3 | Steering multiplier from touchdown until stopped. |
 | `AUTOLAND_TD_OFS` | 25 | -50–100 m | 10–40 | Aims the landing this far short of the roll start to absorb the float after the flare. The default is a typical float. Set it by hand from the touchdown reports. |
 
@@ -490,18 +533,13 @@ Every parameter, with how to choose its value, is covered in
   the pits and take off with TAKEOFF. If you hand-launch, or take off manually, there
   is no touchdown reference.
 - **The barometer must read true height on the approach.** Every height in the
-  circuit, the final and the flare decision comes from it.
-  - On a closed foam fuselage the prop wash coming in through the cowling
-    pressurises the whole inside, so the baro reads low with throttle (about 4 m low
-    at full throttle on the test aircraft). Foam over the baro chip doesn't help: the
-    pressure is the same throughout the fuselage.
-  - **The fix is a vent**: a hole that lets the inside pressure equalise (on the
-    test aircraft, one cut in the fuselage). After it the landings were close to
-    perfect without any compensation.
-  - Software compensation was tried in v17 (`BARO1_THST_SCALE` learned on takeoff,
-    plus `BARO1_WCF_FWD`) and removed: on the test aircraft it made the baro read
-    3–4 m high on the idle approach, the aircraft landed progressively short, and
-    the third landing flew into the ground. Leave `BARO1_THST_SCALE` and
+  circuit, the final and the flare decision comes from it. A closed fuselage needs a
+  vent: see [Fuselage vent](#fuselage-vent-required).
+  - Air getting into the fuselage, through the cowling, gaps and cutouts, raises the
+    pressure inside, so the baro reads low (about 4 m low at full throttle on the
+    example aircraft before it was vented). Foam over the baro chip doesn't help:
+    the pressure is the same throughout the fuselage.
+  - **The fix is a vent** behind the flight controller. Leave `BARO1_THST_SCALE` and
     `BARO1_WCF_ENABLE` at 0.
 - **Rangefinders: range matters.**
   - **Outdoor range is less than rated.** `RNGFND1_MAX` is only the configured
@@ -538,7 +576,7 @@ Every parameter, with how to choose its value, is covered in
   aim point, which sits `AUTOLAND_TD_OFS` before the roll start: that ground must be
   clear too.
 - **A gentler final floats less.** In SITL the gentle final touched down about 20 m
-  shorter than v16/v17's diving final with the same `AUTOLAND_TD_OFS`. Watch the
+  shorter than a steep final with the same `AUTOLAND_TD_OFS`. Watch the
   touchdown reports on the first landings and lower `AUTOLAND_TD_OFS` if it lands
   short.
 - **LOITER mode** circles wherever it is selected, including over the pits. Only the
@@ -569,11 +607,11 @@ compare with the core file:
 | Parameter | Pandora (example) | Why on that aircraft |
 |---|---|---|
 | `AUTOLAND_WP_ALT` / `WP_DIST` | 20 / 85 | Trees beyond one end; a short final for a draggy foam aircraft. |
-| Fuselage vent | a hole cut in the fuselage | The closed fuselage pressurised with throttle (baro about 4 m low at full throttle). Vented, v16 landed close to perfectly; v17's software compensation read 3–4 m high and caused a crash. |
-| `AUTOLAND_TD_OFS` | 25 | With v16's diving final it touched down a few metres before the roll start. Re-check with the gentle final, which floats less. |
-| `AUTOLAND_DSC_ARC` / `FNL_HGT` | 180 / 8 | An even ~1.8 m/s descent from the start of the half turn off downwind (trees under the downwind leg), level for the last 60°, then a 1.5 m/s final. v16/v17's 90° arc started the final about 5 m high and dived at 4.5 m/s. |
+| Fuselage vent | an opening cut behind the flight controller | Closed, the fuselage pressurised with throttle (baro about 4 m low at full throttle). Vented, the baro stays within about 0.5 m. |
+| `AUTOLAND_TD_OFS` | 25 | On a steeper final the wheels met the ground within about 5 m of the aim point (GPS). Re-check with the gentle final, which floats less. |
+| `AUTOLAND_DSC_ARC` / `FNL_HGT` | 180 / 8 | An even ~1.8 m/s descent from the start of the half turn off downwind (trees under the downwind leg), level for the last 60°, then a 1.5 m/s final. |
 | `TECS_PITCH_MIN` | -12 | Backstop: limits any dive on the approach to about 3.3 m/s. |
-| `LAND_FLARE_SEC` | 2 | 1 s flared too late with the diving final. |
+| `LAND_FLARE_SEC` | 2 | 1 s flared too late on a steep final. |
 | `AUTOLAND_RO_GAIN` | 3 | The tailwheel lost authority as it slowed. |
 | `TKOFF_TDRAG_ELEV` / `_SPD1` | 60 / 9 | Releasing the tail at 5 m/s lifted it early and lost steering. |
 | `STEER2SRV_P` / `_I` | 6 / 0 | A light tailwheel needed about twice the nominal gain. I wound up while taxiing. |

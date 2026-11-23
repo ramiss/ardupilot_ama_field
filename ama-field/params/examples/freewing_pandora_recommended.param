@@ -13,20 +13,18 @@ AUTOLAND_WP_DIST,85
 AUTOLAND_SIDEGAP,5
 # even ~1.8 m/s descent round the base circle from the start of the half turn off
 # downwind (180 deg before lined up; trees under the downwind leg), level for the last
-# 60 deg at 8 m, then a 1.5 m/s final (v16/v17: DSC_ARC 90 started the final ~5 m high
-# and dived at 4.5 m/s)
+# 60 deg at 8 m, then a 1.5 m/s final
 AUTOLAND_DSC_ARC,180
 AUTOLAND_FNL_HGT,8
 AUTOLAND_RO_GAIN,3
-# vented, with v16's diving final: touched down a few metres before the roll start.
+# on a steeper final the wheels met the ground within ~5 m of the aim point (GPS).
 # The gentle final floats less (SITL: ~20 m shorter): check the touchdown reports
 AUTOLAND_TD_OFS,25
 AUTOLAND_DIR_OFF,0
 AUTOLAND_CLIMB,0
 #
-# --- no baro compensation: the fuselage is vented instead ---
-# (v17's compensation, 50 Pa thrust scale learned on takeoff + WCF_FWD 0.15, read
-# 3-4 m high on the approach and caused a crash). Set these to 0 while still on v17, before flashing.
+# --- no baro compensation: the fuselage is vented (an opening behind the flight
+# controller) ---
 BARO1_THST_SCALE,0
 BARO1_WCF_ENABLE,0
 #

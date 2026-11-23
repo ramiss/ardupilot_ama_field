@@ -197,17 +197,17 @@ is the same throughout the fuselage.
   prop, and in FBWA or MANUAL, with the hatches and cowl as flown, watch the altitude
   in Mission Planner while you hold about 0, 50 and 100% throttle for a few seconds
   each. It should stay within about ±0.5 m.
-- **If it drops**, vent the fuselage: a hole that lets the inside pressure equalise
-  with the outside. On the test aircraft one cut in the fuselage was enough, and the
-  landings were close to perfect afterwards.
+- **If it drops**, vent the fuselage. Any fuselage that air can get into needs an
+  exit of at least 1 square inch, ideally more, behind the flight controller,
+  wherever the motor is (README,
+  [Fuselage vent](../../README.md#fuselage-vent-required)). On the example aircraft
+  one opening was enough.
 - **In flight**, with a rangefinder, the log's `ALRF.Corr` on each AUTOLAND final is
   how far the baro height is above the rangefinder's (positive = baro reads high).
   More than about 1 m either way needs looking at.
 
-Leave `BARO1_THST_SCALE` and `BARO1_WCF_ENABLE` at 0. v17 compensated the baro in
-software (thrust scale learned on takeoff, plus the airspeed term): on the test
-aircraft it made the baro read 3–4 m high on the idle approach, each landing came in
-shorter, and the third flew into the ground. It was removed.
+Leave `BARO1_THST_SCALE` and `BARO1_WCF_ENABLE` at 0: the field mode relies on a
+vented fuselage, not on software compensation.
 
 ### 4.2 Touchdown point (`AUTOLAND_TD_OFS`)
 
@@ -229,13 +229,11 @@ changed automatically.
   final changes where it touches down. `TDLN.PIn` is 1 on those landings. Aileron and
   rudder corrections don't matter much.
 
-Why not learn it automatically: v17 did, moving `AUTOLAND_TD_OFS` half way to each
-measured float. A touchdown moved by a height error, wind or a pilot correction is
-not the float, and learning from it walked the offset away from the right value (on
-the crash flights, from 20 to 0 in three landings).
+It isn't set automatically: a touchdown moved by wind, a height error or a pilot
+correction isn't the aircraft's normal float, so set it from several clean landings.
 
-**Start from the default**, 25 m. With v16's diving final the test aircraft touched
-down a few metres before the roll start with it. The gentle final (6) arrives slower
+**Start from the default**, 25 m. On a steeper final the example aircraft's wheels
+met the ground within about 5 m of the aim point with it. The gentle final (6) arrives slower
 and floats less: in SITL it touched down about 20 m shorter with the same
 `AUTOLAND_TD_OFS`. Watch the first reports and lower it if it lands short, and make
 sure the ground before the runway is clear.
@@ -273,7 +271,7 @@ check the touchdown reports again.
 | Weaves left and right on the final | The final tracks the runway line with 0.6 × `NAVL1_PERIOD`; raise `NAVL1_PERIOD` by 1–2. |
 | Final too steep, arrives fast | Lower `AUTOLAND_FNL_HGT`, or lengthen `AUTOLAND_WP_DIST`. |
 | Final too shallow, drags in low over obstacles | Raise `AUTOLAND_FNL_HGT`, or shorten `AUTOLAND_WP_DIST`. |
-| Dives on the final (sink well above the planned rate) | Check `AUTOLAND_FNL_HGT` is set (0 gives v16/v17's continuous glide, which starts the final high) and the baro (4.1). `TECS_PITCH_MIN` -12 limits it. |
+| Dives on the final (sink well above the planned rate) | Check `AUTOLAND_FNL_HGT` is set (0 gives one continuous glide, which starts the final high) and the baro (4.1). `TECS_PITCH_MIN` -12 limits it. |
 | Circuit too big for the fence | Shorten `AUTOLAND_WP_DIST`. Lower `NAVL1_PERIOD` to fly the circle tighter. |
 | Slow on final, sinks early | Raise `TECS_LAND_ARSPD`. |
 
