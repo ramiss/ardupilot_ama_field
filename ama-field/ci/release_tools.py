@@ -84,18 +84,6 @@ PROTECTED_CONSEQUENCES = {
     'AP_BATTERY_GENERATOR_ENABLED': 'Battery monitor fed by a generator',
 }
 
-# Turned on for every board by field-mode.hwdef. Only the last fallback build
-# (trim tier 2 without field-mode.hwdef) may lose them; the release notes show
-# them as "baro comp", not in the removed lists.
-FIELD_MODE_DEFINES = {
-    'AP_BARO_THST_COMP_ENABLED': 'Baro thrust compensation (BARO1_THST_SCALE)',
-    'HAL_BARO_WIND_COMP_ENABLED': 'Baro wind (airspeed) compensation (BARO1_WCF_*)',
-}
-FIELD_MODE_OVERLAY = 'field-mode.hwdef'
-TUNING_NO_BARO = 'ama-field/docs/TUNING.md#44-boards-without-baro-compensation'
-BARO_PRIMARY_NOTE = ('Baro thrust compensation applies to the first barometer only: on a board with more '
-                     'than one, leave `BARO_PRIMARY` at 0.')
-
 
 def read_list(path):
     """Board names from a file: one per line, '#' starts a comment."""
@@ -270,10 +258,6 @@ def cmd_overlays(args):
             if is_protected(name) and name not in PROTECTED_CONSEQUENCES:
                 print('::error::%s (%s) is a protected feature' % (name, tier['name']))
                 rc = 1
-        for name in defines:
-            if name in FIELD_MODE_DEFINES:
-                print('::error::%s (%s) is turned on by %s' % (name, tier['name'], FIELD_MODE_OVERLAY))
-                rc = 1
         path = os.path.join(CI_DIR, 'trim-tier%u.hwdef' % (i + 1))
         text = overlay_text(i, tier, defines)
         if args.check:
@@ -286,17 +270,6 @@ def cmd_overlays(args):
             with open(path, 'w', newline='\n') as f:
                 f.write(text)
             print('wrote %s (%u defines)' % (os.path.relpath(path, ROOT), len(defines)))
-    # the hand-written field-mode overlay must turn on exactly FIELD_MODE_DEFINES
-    with open(os.path.join(CI_DIR, FIELD_MODE_OVERLAY)) as f:
-        on = set(re.findall(r'^\s*define\s+([A-Z0-9_]+)\s+1\b', f.read(), re.M))
-    if on != set(FIELD_MODE_DEFINES):
-        print('::error::%s turns on %s, expected %s'
-              % (FIELD_MODE_OVERLAY, ' '.join(sorted(on)), ' '.join(sorted(FIELD_MODE_DEFINES))))
-        rc = 1
-    for name in FIELD_MODE_DEFINES:
-        if name not in known:
-            print('::error::%s (%s) is not defined anywhere in this tree' % (name, FIELD_MODE_OVERLAY))
-            rc = 1
     if args.check and rc == 0:
         print('trim overlays are up to date')
     return rc
@@ -378,19 +351,14 @@ def cmd_trimdiff(args):
     labels = probe_names()
     labels.update(PROTECTED_CONSEQUENCES)
     removed = [n for n in sorted(stock) if stock[n] and not trimmed.get(n)]
-    # the baro compensation is reported in its own column, not as a removed feature
-    lost_field = [n for n in removed if n in FIELD_MODE_DEFINES]
-    removed = [n for n in removed if n not in FIELD_MODE_DEFINES]
     bad = [n for n in removed if is_protected(n) and n not in PROTECTED_CONSEQUENCES]
-    if lost_field and not args.no_baro_comp:
-        bad += lost_field
     with open(args.out, 'w', newline='\n') as f:
         for n in removed:
             f.write('%s\t%s\n' % (n, labels.get(n, n)))
     if bad:
         print('protected features removed: %s' % ' '.join(bad))
         return 1
-    print('%u features removed%s' % (len(removed), ', no baro compensation' if lost_field else ''))
+    print('%u features removed' % len(removed))
     return 0
 
 
@@ -415,13 +383,13 @@ def read_results(boards, results_dir):
     for b in boards:
         path = os.path.join(results_dir, b + '.tsv')
         r = {'ok': False, 'tier': '', 'used': '', 'free': '', 'files': [], 'reason': 'build job did not finish',
-             'removed': [], 'baro': ''}
+             'removed': []}
         if os.path.exists(path):
             with open(path) as f:
-                fields = (f.read().rstrip('\n').split('\t') + [''] * 8)[:8]
-            _, status, tier, used, free, files, reason, baro = fields
+                fields = (f.read().rstrip('\n').split('\t') + [''] * 7)[:7]
+            _, status, tier, used, free, files, reason = fields
             r.update({'ok': status == 'ok', 'tier': tier, 'used': used, 'free': free,
-                      'files': files.split(), 'reason': reason.replace('`', "'"), 'baro': baro})
+                      'files': files.split(), 'reason': reason.replace('`', "'")})
         rpath = os.path.join(results_dir, b + '.removed.tsv')
         if os.path.exists(rpath):
             with open(rpath) as f:
@@ -438,13 +406,6 @@ def cmd_report(args):
     ok = [b for b in boards if results[b]['ok']]
     failed = [b for b in boards if not results[b]['ok']]
     trimmed = [b for b in ok if results[b]['tier'] not in ('', 'stock')]
-    no_baro = [b for b in ok if results[b]['baro'] != 'yes']
-    tuning = 'https://github.com/%s/blob/%s/%s' % (args.repo, args.sha, TUNING_NO_BARO)
-
-    def baro_cell(r):
-        if r['baro'] == 'yes':
-            return 'yes'
-        return '**%s**: relies on AUTOLAND_TD_OFS, see [TUNING.md](%s)' % (r['baro'] or '?', tuning)
 
     # checksums for every published file
     files = sorted(f for f in os.listdir(args.files) if f != 'SHA256SUMS.txt') if os.path.isdir(args.files) else []
@@ -454,8 +415,8 @@ def cmd_report(args):
                 f.write('%s  %s\n' % (sha256(os.path.join(args.files, name)), name))
 
     def board_table(link_files):
-        rows = ['| Board | Status | Build | Baro comp | Flash used | Flash free | Files |',
-                '|---|---|---|---|---|---|---|']
+        rows = ['| Board | Status | Build | Flash used | Flash free | Files |',
+                '|---|---|---|---|---|---|']
         for b in boards:
             r = results[b]
             if r['ok']:
@@ -469,10 +430,10 @@ def cmd_report(args):
                 tier = r['tier'] or 'stock'
                 if tier != 'stock':
                     tier = '**%s** ([%u removed](#removed-%s))' % (tier, len(r['removed']), b.lower())
-                rows.append('| %s | OK | %s | %s | %s | %s | %s |'
-                            % (b, tier, baro_cell(r), kb(r['used']), kb(r['free']), ', '.join(names)))
+                rows.append('| %s | OK | %s | %s | %s | %s |'
+                            % (b, tier, kb(r['used']), kb(r['free']), ', '.join(names)))
             else:
-                rows.append('| %s | **failed**: %s | – | – | – | – | not available |' % (b, r['reason']))
+                rows.append('| %s | **failed**: %s | – | – | – | not available |' % (b, r['reason']))
         return rows
 
     def removed_lists():
@@ -488,16 +449,12 @@ def cmd_report(args):
     tier_help = ['Build: **stock** is the board\'s normal ArduPilot configuration. A 1 MB board '
                  'that does not fit is rebuilt with **tier 1** (%s) and, if still too big, '
                  '**tier 2** (%s). The list below the table shows exactly what each trimmed '
-                 'board is missing.' % (TRIM_TIERS[0]['title'], TRIM_TIERS[1]['title']), '',
-                 'Baro comp: every build has baro thrust and airspeed compensation (`BARO1_THST_SCALE`, '
-                 'learned on each auto takeoff, and `BARO1_WCF_*`), unless the board only fits without it. '
-                 'A board marked **no** relies on `AUTOLAND_TD_OFS` (learned on each landing, like every '
-                 'board) to take up the larger float; see [TUNING.md](%s). %s' % (tuning, BARO_PRIMARY_NOTE)]
+                 'board is missing.' % (TRIM_TIERS[0]['title'], TRIM_TIERS[1]['title'])]
 
     # job summary
     s = ['## AMA field mode firmware %s' % args.version, '',
-         '%u of %u boards built, %u of them trimmed, %u without baro compensation. Commit `%s`.'
-         % (len(ok), len(boards), len(trimmed), len(no_baro), args.sha[:10]), '']
+         '%u of %u boards built, %u of them trimmed. Commit `%s`.'
+         % (len(ok), len(boards), len(trimmed), args.sha[:10]), '']
     s += board_table(None)
     if failed:
         s += ['', 'Failed boards: %s. Each build log is in the workflow artifacts.' % ', '.join(failed)]
@@ -525,8 +482,7 @@ def cmd_report(args):
     n += [''] + tier_help
     if failed:
         n += ['', 'Boards marked failed are **not available** in this release, usually because '
-              'the firmware does not fit in a 1 MB flash even with tier 2 trimming and no baro '
-              'compensation.']
+              'the firmware does not fit in a 1 MB flash even with tier 2 trimming.']
     if trimmed:
         n += ['', '## Features removed from trimmed boards', '']
         n += removed_lists()
@@ -571,8 +527,7 @@ def cmd_report(args):
     with open(args.notes, 'w', newline='\n', encoding='utf-8') as f:
         f.write('\n'.join(n) + '\n')
 
-    print('%u of %u boards built, %u trimmed, %u without baro compensation'
-          % (len(ok), len(boards), len(trimmed), len(no_baro)))
+    print('%u of %u boards built, %u trimmed' % (len(ok), len(boards), len(trimmed)))
     if not ok:
         print('::error::no board built successfully')
         return 1
@@ -599,8 +554,6 @@ def main():
     t.add_argument('--stock', required=True)
     t.add_argument('--trimmed', required=True)
     t.add_argument('--out', required=True)
-    t.add_argument('--no-baro-comp', action='store_true',
-                   help='build without field-mode.hwdef: the baro compensation may be off')
 
     r = sub.add_parser('report')
     r.add_argument('--boards', required=True, help='space separated, in table order')

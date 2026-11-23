@@ -1021,15 +1021,7 @@ public:
     AP_Int16 td_offset;
     AP_Int16 desc_arc;
     AP_Float rollout_gain;
-    AP_Int8  td_learn;
-#if AP_BARO_THST_COMP_ENABLED
-    AP_Int8  baro_learn;
-
-    // AUTOLAND_BAROLRN: called every loop
-    void baro_learn_update(void);
-    // TAKEOFF entered on the ground: measure the baro thrust error on this run-up
-    void baro_learn_takeoff_start(void);
-#endif
+    AP_Float final_hgt;
 
     // Bitfields of AUTOLAND_OPTIONS
     enum class AutoLandOption {
@@ -1065,7 +1057,7 @@ public:
     float flown_circle_radius(float commanded_m, float extra_speed = 0) const;
 
     // pits side of a line: -1 left, +1 right, 0 unknown (pits = first good GPS fix point since power-up)
-    int8_t pits_side(const Location &line_pt, float heading_deg) const;
+    int8_t pits_side(const Location &line_pt, float heading_deg, float *offset_m = nullptr) const;
     bool has_gps_fix_point() const { return gps_fix_loc_valid; }
     bool has_flown_this_arming() const { return flown_this_arming; }
     float get_rollout_gain() const { return rollout_gain; }
@@ -1082,6 +1074,7 @@ public:
 
 protected:
     bool _enter() override;
+    void _exit() override;
     AP_Mission::Mission_Command cmd_climb;
     AP_Mission::Mission_Command cmd_loiter;
     AP_Mission::Mission_Command cmd_land;
@@ -1106,7 +1099,7 @@ protected:
     bool flown_this_arming = false;
 
     // touchdown detection on an AUTOLAND final, for the rollout steering and the
-    // touchdown learning. Tiers, sensor agnostic (RNGFNDx_MIN/_GNDCLR, status):
+    // touchdown report. Tiers, sensor agnostic (RNGFNDx_MIN/_GNDCLR, status):
     enum class TdTier : uint8_t {
         NONE = 0,
         GROUND_VISIBLE = 1,   // rangefinder reads its ground clearance
@@ -1129,63 +1122,35 @@ protected:
     void touchdown_reset(void);
     void rangefinder_config_check(void);
 
-#if AP_BARO_THST_COMP_ENABLED
-    // AUTOLAND_BAROLRN: BARO1_THST_SCALE from the stationary part of the takeoff run-up
-    enum class BaroLearnState : uint8_t {
-        IDLE,       // armed, parked: keep a baseline of the last second
-        WAIT,       // TAKEOFF selected on the ground, waiting for the throttle to rise
-        SAMPLING,   // throttle rising, still stationary
-        DONE,       // finished for this arming
-    };
-    enum class BaroLearnResult : uint8_t {
-        ACCEPTED = 0,
-        TOO_SHORT = 1,
-        TOO_NOISY = 2,
-        OUT_OF_RANGE = 3,
-        NO_BASELINE = 4,
-    };
-    static constexpr uint8_t BARO_LEARN_BASE_LEN = 20;   // 1 s at 20 Hz
+    // base circle descent (AUTOLAND_DSC_ARC / AUTOLAND_FNL_HGT)
     struct {
-        BaroLearnState state;
-        float base[BARO_LEARN_BASE_LEN];   // raw BARO1 pressure while parked, Pa
-        uint8_t base_n;
-        uint8_t base_idx;
-        float baseline;
-        float base_sd;
-        uint32_t last_ms;
-        uint32_t start_ms;
-        uint32_t end_ms;
-        uint16_t n;
-        float sum_tp;       // sum of throttle x pressure rise, throttle >= 0.25
-        float sum_tt;       // sum of throttle squared, throttle >= 0.25
-        uint16_t n_fit;
-        float thr_min;
-        float thr_max;
-        float accel_fwd;    // filtered forward acceleration, m/s/s
-        bool save_pending;  // learned value to save at disarm
-    } baro_lrn;
-    void baro_learn_finish(void);
-#endif
+        bool armed;             // the descent starts on reaching start_deg
+        float start_deg;        // descent start, degrees of turn still to go
+        float start_hgt;        // height the descent started from, m above the touchdown aim
+        bool started;           // descending
+        float lowest;           // lowest circle target so far, m above the touchdown aim
+        uint8_t extra_laps;     // laps added because the aircraft was high at the exit
+        bool block_exit;        // flying an extra lap: don't leave at this pass
+        float final_frac_max;   // final glide starts this many AUTOLAND_WP_DIST out (the circle exit)
+        float tconst;           // TECS_HDEM_TCONST, s
+    } circle_dsc;
+    bool circle_descent_height(float &hgt);
 
-    // AUTOLAND_TDLRN: AUTOLAND_TD_OFS from where each landing touches down
+    // touchdown report: where each landing touched down from the roll start
     enum class TdLearnState : uint8_t {
-        IDLE,       // not landing at the roll start, or learning off
+        IDLE,       // not landing at the roll start
         WATCH,      // AUTOLAND aimed at the roll start: waiting for the touchdown
         TOUCHED,    // touchdown seen: checking it stays down
         DONE,       // finished for this landing
     };
     enum class TdLearnResult : uint8_t {
-        ACCEPTED = 0,
-        PILOT_INPUT = 1,
-        OFF_LINE = 2,
-        OUT_OF_RANGE = 3,
-        MODE_CHANGE = 4,
-        NOT_SEEN = 5,
+        REPORTED = 0,
+        MODE_CHANGE = 1,
+        NOT_SEEN = 2,
     };
     struct {
         TdLearnState state;
         bool pilot_input;       // elevator or throttle input on the final, flare or rollout
-        bool save_pending;      // learned value to save at disarm
         uint8_t source;         // touchdown seen by 0 the sink stopping, 1/2 the rangefinder (TdTier)
         int16_t aim_ofs;        // AUTOLAND_TD_OFS this landing was aimed with
         bool still_loc_pending; // record where the sink next stops

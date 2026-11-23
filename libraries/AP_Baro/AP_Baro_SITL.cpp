@@ -4,7 +4,6 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
-#include <SRV_Channel/SRV_Channel.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -132,16 +131,6 @@ void AP_Baro_SITL::_timer()
 
     // add in correction for wind effects
     p += wind_pressure_correction(_instance);
-
-    // fuselage pressure from the prop wash (SIM_BARO_THST). On a plane this
-    // follows the throttle output, so it is still there when a test holds the
-    // aircraft still with SIM_ENGINE_FAIL/SIM_ENGINE_MUL
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-    const float thst_throttle = constrain_float(SRV_Channels::get_slew_limited_output_scaled(SRV_Channel::k_throttle) * 0.01f, 0.0f, 1.0f);
-#else
-    const float thst_throttle = _sitl->throttle;
-#endif
-    p += _sitl->baro[_instance].thst * thst_throttle;
 
     _recent_press = p;
     _recent_temp = T;

@@ -1181,6 +1181,9 @@ private:
     void takeoff_calc_pitch(void);
     void takeoff_calc_throttle();
     int8_t takeoff_tail_hold(void);
+#if MODE_AUTOLAND_ENABLED
+    void takeoff_airborne_check(void);
+#endif
     int16_t get_takeoff_pitch_min_cd(void);
     void landing_gear_update(void);
     bool check_takeoff_timeout(void);

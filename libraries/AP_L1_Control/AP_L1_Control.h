@@ -60,6 +60,12 @@ public:
         _L1_period.set_default(period);
     }
 
+    // scale NAVL1_PERIOD for waypoint (straight line) tracking, 0.3 to 1: a
+    // vehicle can track one leg tighter than its tuned period (loiters keep it)
+    void set_period_scale(float scale) {
+        _period_scale = constrain_float(scale, 0.3f, 1.0f);
+    }
+
     void set_data_is_stale(void) override {
         _data_is_stale = true;
     }
@@ -105,6 +111,8 @@ private:
 
     // L1 tracking loop period (sec)
     AP_Float _L1_period;
+    // multiplier on _L1_period for waypoint tracking (set_period_scale)
+    float _period_scale = 1.0f;
     // L1 tracking loop damping ratio
     AP_Float _L1_damping;
 

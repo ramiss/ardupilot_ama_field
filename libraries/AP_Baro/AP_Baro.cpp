@@ -58,9 +58,6 @@
 #include <AP_Vehicle/AP_Vehicle.h>
 #if AP_BARO_THST_COMP_ENABLED
 #include <AP_Motors/AP_Motors.h>
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-#include <SRV_Channel/SRV_Channel.h>
-#endif
 #endif
 
 #define INTERNAL_TEMPERATURE_CLAMP 35.0f
@@ -264,7 +261,7 @@ const AP_Param::GroupInfo AP_Baro::var_info[] = {
 #if AP_BARO_THST_COMP_ENABLED
     // @Param: 1_THST_SCALE
     // @DisplayName: Thrust compensation
-    // @Description: Thrust scaling in Pascals. This value scaled by the normalized thrust is subtracted from the barometer pressure. This is used to adjust linearly based on the thrust output for local pressure difference induced by the props. On a plane without VTOL motors it uses the forward motor throttle (0 to 1, reverse thrust ignored), for a fuselage pressurised by prop wash. Positive if the baro altitude drops as the throttle rises.
+    // @Description: Thrust scaling in Pascals. This value scaled by the normalized thrust is subtracted from the barometer pressure. This is used to adjust linearly based on the thrust output for local pressure difference induced by the props.
     // @Range: -300 300
     // @User: Advanced
     AP_GROUPINFO("1_THST_SCALE", 25, AP_Baro, sensors[0].mot_scale, 0),
@@ -1044,12 +1041,7 @@ float AP_Baro::thrust_pressure_correction(uint8_t instance)
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane) || APM_BUILD_COPTER_OR_HELI
     const AP_Motors* motors = AP::motors();
     if (motors == nullptr) {
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-        // no VTOL motors: the forward motor pressurises the fuselage
-        return sensors[instance].mot_scale * get_forward_throttle();
-#else
          return 0.0f;
-#endif
     }
     const float motors_throttle = MAX(0,motors->get_throttle_out());
     return sensors[instance].mot_scale * motors_throttle;
@@ -1057,17 +1049,6 @@ float AP_Baro::thrust_pressure_correction(uint8_t instance)
     return 0.0f;
 #endif
 }
-
-#if APM_BUILD_TYPE(APM_BUILD_ArduPlane)
-float AP_Baro::get_forward_throttle(void) const
-{
-    if (!hal.util->get_soft_armed()) {
-        return 0.0f;
-    }
-    // the throttle actually output (after TKOFF_THR_SLEW / THR_SLEWRATE), not the demand
-    return constrain_float(SRV_Channels::get_slew_limited_output_scaled(SRV_Channel::k_throttle) * 0.01f, 0.0f, 1.0f);
-}
-#endif
 #endif
 
 /* register a new sensor, claiming a sensor slot. If we are out of

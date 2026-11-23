@@ -34,8 +34,9 @@
   <!-- 1 transit + level part of circle -->
   <path d="M930,95 L380,125" fill="none" stroke="#5f6368" stroke-width="3.5"/>
   <path d="M380,125 A110,110 0 0 0 220,235" fill="none" stroke="#5f6368" stroke-width="3.5" marker-end="url(#bGray)"/>
-  <!-- 2 descent arc: last 90 deg -->
-  <path d="M220,235 A110,110 0 0 0 330,345" fill="none" stroke="#e8710a" stroke-width="5" marker-end="url(#bOrange)"/>
+  <!-- 2 even descent (DSC_ARC shown as 90 deg), then level for the last 60 deg -->
+  <path d="M220,235 A110,110 0 0 0 234.7,290" fill="none" stroke="#e8710a" stroke-width="5"/>
+  <path d="M234.7,290 A110,110 0 0 0 330,345" fill="none" stroke="#f9ab00" stroke-width="5" stroke-dasharray="10 4" marker-end="url(#bOrange)"/>
   <!-- 3 final -->
   <path d="M330,345 C380,345 410,370 470,370 L640,370" fill="none" stroke="#e8710a" stroke-width="5"/>
   <!-- flare segment -->
@@ -54,9 +55,11 @@
   <!-- labels on circle -->
   <text x="330" y="58" fill="#3c4043" font-size="13" text-anchor="middle">base circle: centred AUTOLAND_WP_DIST behind the aim point,</text>
   <text x="330" y="75" fill="#3c4043" font-size="13" text-anchor="middle">radius sized for speed + wind (≤ 60 m), on the side away from the pits</text>
-  <text x="38" y="270" fill="#c25600" font-weight="700">2  descent starts</text>
-  <text x="38" y="289" fill="#c25600" font-size="13">AUTOLAND_DSC_ARC degrees</text>
+  <text x="38" y="270" fill="#c25600" font-weight="700">2  even descent</text>
+  <text x="38" y="289" fill="#c25600" font-size="13">from AUTOLAND_DSC_ARC</text>
   <text x="38" y="305" fill="#c25600" font-size="13">before lined up (90° shown)</text>
+  <text x="38" y="321" fill="#c25600" font-size="13">to AUTOLAND_FNL_HGT,</text>
+  <text x="38" y="337" fill="#c25600" font-size="13">level for the last 60°</text>
 
   <!-- SIDEGAP dimension -->
   <line x1="300" y1="347" x2="300" y2="368" stroke="#202124" stroke-width="1.2" marker-start="url(#bDim)" marker-end="url(#bDim)"/>
@@ -73,7 +76,7 @@
   <circle cx="640" cy="370" r="8" fill="#202124" stroke="#ffffff" stroke-width="2"/>
   <path d="M640,394 l-7,-12 h14 z" fill="#c5221f"/>
   <text x="652" y="410" fill="#202124" font-size="13" font-weight="600">roll start = touchdown</text>
-  <text x="652" y="426" fill="#80868b" font-size="11">(aim AUTOLAND_TD_OFS short of it, learned on each landing)</text>
+  <text x="652" y="426" fill="#80868b" font-size="11">(aim AUTOLAND_TD_OFS short of it; touchdown reported)</text>
 
   <!-- flare + rollout labels -->
   <text x="600" y="258" fill="#c5221f" font-size="13" text-anchor="end">flare: rudder lines the nose up</text>

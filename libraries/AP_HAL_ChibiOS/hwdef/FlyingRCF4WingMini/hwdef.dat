@@ -133,9 +133,3 @@ define AP_NOTIFY_OREOLED_ENABLED 0
 # --------------------- custom addition ----------------------
 # enable Nooploop TOFSense-F I2C protocol rangefinder (RNGFNDx_TYPE=40), used by MicoAir MT-06 in IIC_NOOPLOOP mode
 define AP_RANGEFINDER_TOFSENSEF_I2C_ENABLED 1
-
-# baro thrust (BARO1_THST_SCALE) and airspeed (BARO1_WCF_*) compensation for AMA field mode;
-# minimize_common.inc turns wind compensation off
-undef HAL_BARO_WIND_COMP_ENABLED
-define HAL_BARO_WIND_COMP_ENABLED 1
-define AP_BARO_THST_COMP_ENABLED 1

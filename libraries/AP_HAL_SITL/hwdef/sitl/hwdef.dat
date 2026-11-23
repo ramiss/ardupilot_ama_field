@@ -1,5 +1,2 @@
 define AP_MOUNT_POI_LOCK_ENABLED 1
 
-
-# AMA field mode: baro thrust compensation (BARO1_THST_SCALE), as on the field-mode release builds
-define AP_BARO_THST_COMP_ENABLED 1

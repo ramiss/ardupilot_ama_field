@@ -10,14 +10,22 @@ constexpr float fast_climb_extra_alt = 10;
 
 // AUTOLAND_TD_OFS default: about the float after the flare, so an untrained
 // aircraft lands near the roll start rather than far down the runway. Test
-// aircraft (Freewing Pandora): 36-48m with the baro uncompensated; SITL with the
-// baro compensated: 25-28m. Split the difference: a little short or long, not a
-// lot long. AUTOLAND_TDLRN refines it from there.
-#if AP_BARO_THST_COMP_ENABLED && HAL_BARO_WIND_COMP_ENABLED
-#define AUTOLAND_TD_OFS_DEFAULT 20
-#else
-#define AUTOLAND_TD_OFS_DEFAULT 30
-#endif
+// aircraft (Freewing Pandora, fuselage vented): 25m touches down a few metres
+// before the roll start.
+#define AUTOLAND_TD_OFS_DEFAULT 25
+
+// the last part of the final turn is flown level at the final's start height
+// (AUTOLAND_FNL_HGT), so the aircraft is settled before the final starts
+static constexpr float AUTOLAND_LEVEL_ARC_DEG = 60.0f;
+// shortest circle descent: AUTOLAND_DSC_ARC is raised to at least this
+static constexpr float AUTOLAND_MIN_DSC_ARC_DEG = AUTOLAND_LEVEL_ARC_DEG + 30.0f;
+// leave the circle only within this height above the final's start height,
+// otherwise fly one more lap
+static constexpr float AUTOLAND_EXIT_HIGH_M = 2.5f;
+// the base circle ends AUTOLAND_SIDEGAP to the far side of the runway line; on the
+// final, track the line with this fraction of NAVL1_PERIOD so the aircraft is on
+// the centreline early instead of converging over most of the final
+static constexpr float AUTOLAND_FINAL_L1_SCALE = 0.6f;
 
 /*
   mode AutoLand parameters
@@ -77,7 +85,7 @@ const AP_Param::GroupInfo ModeAutoLand::var_info[] = {
 
     // @Param: TD_OFS
     // @DisplayName: Touchdown target offset
-    // @Description: Aim the landing this far short of the roll start to absorb the float after the flare (and any baro error left). Needs AUTOLAND_OPTIONS bit 1. Negative moves the aim point further down the runway. The whole landing circuit moves with it. Learned on each landing by AUTOLAND_TDLRN. The default is 20m (30m on a board built without baro compensation), a typical float, so an untrained aircraft lands near the roll start; 0 aims at the roll start itself.
+    // @Description: Aim the landing this far short of the roll start to absorb the float after the flare. Needs AUTOLAND_OPTIONS bit 1. Negative moves the aim point further down the runway. The whole landing circuit moves with it. Each landing reports where it touched down from the roll start ("Autoland: touchdown +4m from roll start") and the value that would have put that landing on the roll start ("Autoland: suggest AUTOLAND_TD_OFS 29 (now 25)"): this value plus the reported distance. Set it from a few landings without elevator or throttle input. The default, 25m, is a typical float; 0 aims at the roll start itself.
     // @Range: -50 100
     // @Increment: 1
     // @Units: m
@@ -86,7 +94,7 @@ const AP_Param::GroupInfo ModeAutoLand::var_info[] = {
 
     // @Param: DSC_ARC
     // @DisplayName: Descent start on the final turn
-    // @Description: With AUTOLAND_OPTIONS bits 1+2, the circuit is flown level and the descent starts this many degrees before the end of the final turn (90 = the last quarter of the circle). The descent is one continuous glide from circuit height over the rest of the turn and the final. 0 = stay level until lined up on final.
+    // @Description: With AUTOLAND_OPTIONS bits 1+2, the circuit is flown level and the descent starts this many degrees before the end of the final turn. With AUTOLAND_FNL_HGT set, the circle descent is one even sink rate down to AUTOLAND_FNL_HGT, reached 60 degrees before the end of the turn; the last 60 degrees are flown level, then the final glides from there to the touchdown aim. This is where the aircraft itself starts descending. From downwind the turn onto final is about 180 degrees, so 180 starts the descent as that turn begins: about 1.8 m/s from a 21m circuit to 8m on a 54m circle at 16 m/s. The higher the circuit and the smaller this angle, the faster the sink; on a 20m circuit below about 150 the arc is too short ("Autoland: descent N m/s, raise AUTOLAND_DSC_ARC") and it flies another lap. Established on the circle past the start point, it starts there if at least 60% of the descent arc is left, so a value above the arrival turn (e.g. 240 on a 180 degree arrival) starts where the aircraft joins the circle. Raised to at least 90. With AUTOLAND_FNL_HGT 0: one continuous glide from circuit height over the rest of the turn and the final. 0 = stay level until lined up on final.
     // @Range: 0 270
     // @Increment: 5
     // @Units: deg
@@ -101,21 +109,16 @@ const AP_Param::GroupInfo ModeAutoLand::var_info[] = {
     // @User: Standard
     AP_GROUPINFO("RO_GAIN", 9, ModeAutoLand, rollout_gain, 1.0f),
 
-#if AP_BARO_THST_COMP_ENABLED
-    // @Param: BAROLRN
-    // @DisplayName: Learn baro thrust compensation on takeoff
-    // @Description: With AUTOLAND_OPTIONS bits 1+2, every TAKEOFF started on the ground measures how far the baro pressure rises with throttle while the aircraft still stands still, and updates BARO1_THST_SCALE: the first measurement is taken as is if BARO1_THST_SCALE is 0, after that each takeoff moves it half way to the new measurement. The new value is used straight away and saved at disarm. Needs TKOFF_THR_SLEW low enough for about 1 s of run-up before the aircraft rolls.
-    // @Values: 0:Off,1:Learn on each takeoff
-    // @User: Standard
-    AP_GROUPINFO("BAROLRN", 10, ModeAutoLand, baro_learn, 1),
-#endif
+    // indexes 10 and 11 were BAROLRN and TDLRN; don't reuse them
 
-    // @Param: TDLRN
-    // @DisplayName: Learn the touchdown offset on landing
-    // @Description: With AUTOLAND_OPTIONS bit 1, every AUTOLAND that touches down measures how far past its aim point it touched down (the float), and updates AUTOLAND_TD_OFS so the next landing touches down at the roll start: each landing moves it half way to the new measurement (the first measurement is taken as is if AUTOLAND_TD_OFS is 0), limited to 0-50m. The touchdown is detected by the rangefinder (reading its ground clearance, or its range ending at its minimum with the sink stopped low down) or, without one, where the GPS-aided sink rate stops for good (at the wheel impact on the accelerometer if there is one); a bounce waits for the next contact. Not learned if the pilot moves the elevator stick, raises the throttle stick above 60% (it only acts above half way, as a throttle nudge; 0-60% is ignored), or changes mode, between the start of the final and 2 s after the touchdown, or if the touchdown is more than 15m off the runway line; aileron and rudder corrections are allowed. Saved at disarm.
-    // @Values: 0:Off,1:Learn on each landing
+    // @Param: FNL_HGT
+    // @DisplayName: Height at the start of the final
+    // @Description: With AUTOLAND_OPTIONS bits 1+2 and AUTOLAND_DSC_ARC set, the circle descent ends at this height above the touchdown aim, reached 60 degrees before the end of the final turn and held level to the final; the final then glides from it to the aim over AUTOLAND_WP_DIST (8m over 85m is about 5.4 degrees, 1.5 m/s at 16 m/s). A gentle final needs little flare. Low finals fly low over the ground before the aim point: keep it clear. 0 = the final start height follows from the circle geometry (one continuous glide).
+    // @Range: 0 50
+    // @Increment: 0.5
+    // @Units: m
     // @User: Standard
-    AP_GROUPINFO("TDLRN", 11, ModeAutoLand, td_learn, 1),
+    AP_GROUPINFO("FNL_HGT", 12, ModeAutoLand, final_hgt, 8),
 
     AP_GROUPEND
 };
@@ -167,12 +170,24 @@ bool ModeAutoLand::_enter()
         // aim short of the roll start by AUTOLAND_TD_OFS to allow for the flare float
         home.offset_bearing(plane.takeoff_state.initial_direction.heading, -float(td_offset.get()));
     }
-    // AUTOLAND_TDLRN: measure where this landing touches down
-    td_lrn.state = (use_roll_start && td_learn > 0) ? TdLearnState::WATCH : TdLearnState::IDLE;
+    // measure and report where this landing touches down
+    td_lrn.state = use_roll_start ? TdLearnState::WATCH : TdLearnState::IDLE;
     td_lrn.aim_ofs = td_offset;
     td_lrn.pilot_input = false;
     td_lrn.spike_ms = 0;
     td_lrn.still_loc_pending = true;
+
+    // circle descent (AUTOLAND_DSC_ARC / AUTOLAND_FNL_HGT)
+    circle_dsc.armed = false;
+    circle_dsc.start_deg = 0;
+    circle_dsc.start_hgt = 0;
+    circle_dsc.started = false;
+    circle_dsc.lowest = 0;
+    circle_dsc.extra_laps = 0;
+    circle_dsc.block_exit = false;
+    circle_dsc.final_frac_max = 1.0f;
+    circle_dsc.tconst = 0;
+    IGNORE_RETURN(AP_Param::get("TECS_HDEM_TCONST", circle_dsc.tconst));
 
 #ifndef HAL_LANDING_DEEPSTALL_ENABLED
     if (plane.landing.get_type() == AP_Landing::TYPE_DEEPSTALL) {
@@ -369,28 +384,122 @@ void ModeAutoLand::update_target_altitude()
         // lining up on the runway takes a while (crosswind)
         Location target = cmd_land.content.location;
         const float dist = target.get_distance(plane.current_loc);
-        const float frac = constrain_float(dist / MAX(target.get_distance(land_start), 10.0f), 0.0f, 1.0f);
+        const float frac = constrain_float(dist / MAX(target.get_distance(land_start), 10.0f), 0.0f, circle_dsc.final_frac_max);
         target.offset_up_m(approach_hgt * frac);
         plane.set_target_altitude_location(target);
         return;
     }
     if (stage == AutoLandStage::LOITER && runway_options_enabled() &&
         desc_arc > 0 && plane.reached_loiter_target()) {
-        const float rem_deg = final_turn_remaining_deg();
-        if (rem_deg <= desc_arc) {
-            // glide down from circuit height over the rest of the turn plus
-            // the final, by path distance still to go
-            const float radius = plane.nav_controller->loiter_radius(cmd_loiter.p1);
-            const float final_len = MAX(cmd_land.content.location.get_distance(land_start), 10.0f);
-            const float frac = (radius * radians(rem_deg) + final_len) /
-                               (radius * radians(float(desc_arc.get())) + final_len);
+        float hgt;
+        if (circle_descent_height(hgt)) {
             Location target = cmd_land.content.location;
-            target.offset_up_m(approach_hgt * frac);
+            target.offset_up_m(hgt);
             plane.set_target_altitude_location(target);
             return;
         }
     }
     Mode::update_target_altitude();
+}
+
+/*
+  target height above the touchdown aim on the base circle (AUTOLAND_DSC_ARC),
+  false while still level at circuit height.
+
+  With AUTOLAND_FNL_HGT: one even descent, starting where the aircraft is
+  AUTOLAND_DSC_ARC degrees before the end of the final turn, down to
+  AUTOLAND_FNL_HGT reached 60 degrees before the end, then level to the final.
+  Outside the landing stage TECS lags its height demand by TECS_HDEM_TCONST, so
+  the plan is read that far ahead along the circle: the aircraft then flies the
+  plan itself and levels off where planned (without it, it trails the plan by
+  sink rate x 3 s, and the final starts that far above its glide path). At the
+  start the read-ahead target is already part way down; the lag turns that into
+  the same even sink from the start point. The descent starts from the height
+  the aircraft is at, and never climbs back: a further lap holds the lowest
+  target reached.
+
+  Without AUTOLAND_FNL_HGT: one continuous glide from circuit height over the
+  rest of the turn and the final, by path distance still to go.
+ */
+bool ModeAutoLand::circle_descent_height(float &hgt)
+{
+    const float rem_deg = final_turn_remaining_deg();
+    const float radius = MAX(plane.nav_controller->loiter_radius(cmd_loiter.p1), 10.0f);
+    const float final_len = MAX(cmd_land.content.location.get_distance(land_start), 10.0f);
+
+    if (!is_positive(final_hgt.get())) {
+        if (rem_deg > desc_arc) {
+            return false;
+        }
+        const float frac = (radius * radians(rem_deg) + final_len) /
+                           (radius * radians(float(desc_arc.get())) + final_len);
+        hgt = approach_hgt * frac;
+        return true;
+    }
+
+    const float fnl = MIN(float(final_hgt.get()), approach_hgt);
+    const float dsc = MAX(float(desc_arc.get()), AUTOLAND_MIN_DSC_ARC_DEG);
+    const float gs = MAX(plane.gps.ground_speed(), 5.0f);
+    const float lead_deg = MIN(degrees(gs * MAX(circle_dsc.tconst, 0.0f) / radius), 60.0f);
+    const float ahead = rem_deg - lead_deg;
+
+    if (!circle_dsc.started) {
+        // only on the circle and turning its way: the degrees still to go mean
+        // nothing while joining it (often an S-turn)
+        const float yaw_rate = degrees(plane.ahrs.get_gyro().z);
+        const bool turning = cmd_loiter.content.location.loiter_ccw ? yaw_rate < -5.0f : yaw_rate > 5.0f;
+        const float circle_err = fabsf(plane.current_loc.get_distance(cmd_loiter.content.location) - radius);
+        if (!turning || circle_err > MAX(15.0f, 0.25f * radius)) {
+            return false;
+        }
+        if (rem_deg >= dsc - 5.0f) {
+            // before the descent start point: passing it starts the descent
+            circle_dsc.armed = true;
+            circle_dsc.start_deg = dsc;
+        } else if (!circle_dsc.armed && rem_deg - AUTOLAND_LEVEL_ARC_DEG >= 0.6f * (dsc - AUTOLAND_LEVEL_ARC_DEG)) {
+            // established on the circle past the start point: start here if at least
+            // 60% of the descent arc is left (at most 1.7x the planned sink rate),
+            // else one more lap
+            circle_dsc.armed = true;
+            circle_dsc.start_deg = rem_deg;
+        }
+        if (!circle_dsc.armed || rem_deg > circle_dsc.start_deg) {
+            return false;
+        }
+        float cur_abs, tgt_abs;
+        circle_dsc.start_hgt = approach_hgt;
+        if (plane.current_loc.get_alt_m(Location::AltFrame::ABSOLUTE, cur_abs) &&
+            cmd_land.content.location.get_alt_m(Location::AltFrame::ABSOLUTE, tgt_abs)) {
+            circle_dsc.start_hgt = constrain_float(cur_abs - tgt_abs, fnl, approach_hgt);
+        }
+        circle_dsc.started = true;
+        circle_dsc.lowest = circle_dsc.start_hgt;
+        const float secs = radius * radians(circle_dsc.start_deg - AUTOLAND_LEVEL_ARC_DEG) / gs;
+        const float sink = (circle_dsc.start_hgt - fnl) / MAX(secs, 1.0f);
+        if (sink > 2.5f) {
+            // the descent arc is too short for the height to lose
+            gcs().send_text(MAV_SEVERITY_INFO, "Autoland: descent %.1fm/s, raise AUTOLAND_DSC_ARC", sink);
+        }
+    }
+
+    float h;
+    if (ahead >= circle_dsc.start_deg) {
+        h = circle_dsc.start_hgt;
+    } else if (ahead >= AUTOLAND_LEVEL_ARC_DEG) {
+        h = fnl + (circle_dsc.start_hgt - fnl) * (ahead - AUTOLAND_LEVEL_ARC_DEG) /
+                  MAX(circle_dsc.start_deg - AUTOLAND_LEVEL_ARC_DEG, 1.0f);
+    } else if (ahead >= 0) {
+        h = fnl;
+    } else {
+        // looking ahead onto the final
+        h = MAX(fnl * (1.0f - radius * radians(-ahead) / final_len), 0.0f);
+    }
+    // circle part only (not below AUTOLAND_FNL_HGT), latched so it never climbs back
+    circle_dsc.lowest = MIN(circle_dsc.lowest, MAX(h, fnl));
+    // on a further lap, hold the circle height until clear of the exit (the
+    // degrees to go read near 0 just past it, which would look onto the final)
+    hgt = circle_dsc.block_exit ? circle_dsc.lowest : MIN(circle_dsc.lowest, h);
+    return true;
 }
 
 void ModeAutoLand::touchdown_reset(void)
@@ -552,8 +661,17 @@ float ModeAutoLand::final_turn_remaining_deg() const
     return rem;
 }
 
+void ModeAutoLand::_exit()
+{
+    plane.L1_controller.set_period_scale(1.0f);
+}
+
 void ModeAutoLand::navigate()
 {
+    // tighter line tracking on the final, until the flare (see AUTOLAND_FINAL_L1_SCALE)
+    plane.L1_controller.set_period_scale((stage == AutoLandStage::LANDING && runway_options_enabled() &&
+                                          !plane.landing.is_flaring()) ? AUTOLAND_FINAL_L1_SCALE : 1.0f);
+
     switch (stage) {
     case AutoLandStage::CLIMB:
         // Update loiter, although roll limit is applied the vehicle will still navigate (slowly)
@@ -579,27 +697,62 @@ void ModeAutoLand::navigate()
         }
         break;
 
-    case AutoLandStage::LOITER:
+    case AutoLandStage::LOITER: {
         // check if we have arrived and completed loiter at base leg waypoint
-        if (plane.verify_loiter_to_alt(cmd_loiter)) {
-            stage = AutoLandStage::LANDING;
-            if (runway_options_enabled() && desc_arc > 0) {
+        const bool ready = plane.verify_loiter_to_alt(cmd_loiter);
+        const bool fnl_mode = runway_options_enabled() && desc_arc > 0 && is_positive(final_hgt.get());
+        if (circle_dsc.block_exit) {
+            // flying another lap: wait until well away from the exit
+            const float rem = final_turn_remaining_deg();
+            if (rem > 90.0f && rem < 330.0f) {
+                circle_dsc.block_exit = false;
+            }
+            break;
+        }
+        if (!ready) {
+            break;
+        }
+        if (fnl_mode && circle_dsc.extra_laps < 2) {
+            // don't start the final high: that forces a dive to catch the glide path
+            const float fnl = MIN(float(final_hgt.get()), approach_hgt);
+            float cur_abs, tgt_abs;
+            if (plane.current_loc.get_alt_m(Location::AltFrame::ABSOLUTE, cur_abs) &&
+                cmd_land.content.location.get_alt_m(Location::AltFrame::ABSOLUTE, tgt_abs) &&
+                cur_abs - tgt_abs > fnl + AUTOLAND_EXIT_HIGH_M) {
+                circle_dsc.extra_laps++;
+                circle_dsc.block_exit = true;
+                gcs().send_text(MAV_SEVERITY_INFO, "Autoland: %.0fm high on the final turn, another lap",
+                                cur_abs - tgt_abs - fnl);
+                break;
+            }
+        }
+        stage = AutoLandStage::LANDING;
+        if (runway_options_enabled() && desc_arc > 0) {
+            if (fnl_mode) {
+                // the final glides from AUTOLAND_FNL_HGT where the aircraft leaves the
+                // circle (usually a little before the final approach point) to the aim:
+                // land_start's height is put on that line
+                const float final_len = MAX(cmd_land.content.location.get_distance(land_start), 10.0f);
+                const float exit_dist = MAX(plane.current_loc.get_distance(cmd_land.content.location), final_len);
+                circle_dsc.final_frac_max = MIN(exit_dist / final_len, 2.0f);
+                approach_hgt = MIN(float(final_hgt.get()), approach_hgt) / circle_dsc.final_frac_max;
+            } else {
                 // the planned glide is already part way down at the end of
                 // the turn: continue the final from that height
                 const float radius = plane.nav_controller->loiter_radius(cmd_loiter.p1);
                 const float final_len = MAX(cmd_land.content.location.get_distance(land_start), 10.0f);
                 approach_hgt *= final_len / (radius * radians(float(desc_arc.get())) + final_len);
-                float tgt_abs;
-                if (cmd_land.content.location.get_alt_m(Location::AltFrame::ABSOLUTE, tgt_abs)) {
-                    land_start.set_alt_m(tgt_abs + approach_hgt, Location::AltFrame::ABSOLUTE);
-                }
             }
-            plane.start_command(cmd_land);
-            // Crosstrack from the land start location
-            plane.prev_WP_loc = land_start;
-
+            float tgt_abs;
+            if (cmd_land.content.location.get_alt_m(Location::AltFrame::ABSOLUTE, tgt_abs)) {
+                land_start.set_alt_m(tgt_abs + approach_hgt, Location::AltFrame::ABSOLUTE);
+            }
         }
+        plane.start_command(cmd_land);
+        // Crosstrack from the land start location
+        plane.prev_WP_loc = land_start;
         break;
+    }
 
     case AutoLandStage::LANDING:
         plane.set_flight_stage(AP_FixedWing::FlightStage::LAND);
@@ -625,9 +778,6 @@ void ModeAutoLand::check_takeoff_direction()
 #endif
 
     update_gps_fix_point();
-#if AP_BARO_THST_COMP_ENABLED
-    baro_learn_update();
-#endif
     touchdown_update();
     td_learn_update();
 
@@ -809,13 +959,16 @@ bool ModeAutoLand::refresh_runway_circle(Location &wp) const
   pits). HOME is deliberately not used: it moves when re-arming on the
   runway or when set from a GCS.
  */
-int8_t ModeAutoLand::pits_side(const Location &line_pt, float heading_deg) const
+int8_t ModeAutoLand::pits_side(const Location &line_pt, float heading_deg, float *offset_ret) const
 {
     if (!gps_fix_loc_valid) {
         return 0;
     }
     const float err_deg = wrap_180(heading_deg - degrees(line_pt.get_bearing(gps_fix_loc)));
     const float offset_m = line_pt.get_distance(gps_fix_loc) * sinf(radians(err_deg));
+    if (offset_ret != nullptr) {
+        *offset_ret = fabsf(offset_m);
+    }
     if (fabsf(offset_m) <= 5.0f) {
         return 0;
     }
@@ -861,10 +1014,15 @@ bool ModeAutoLand::takeoff_pits_check(void)
         return false;
     }
     const float heading = wrap_360(plane.ahrs.get_yaw_deg());
-    if (pits_side(plane.current_loc, heading) == 0) {
+    float offset_m = 0;
+    const int8_t pits = pits_side(plane.current_loc, heading, &offset_m);
+    if (pits == 0) {
         gcs().send_text(MAV_SEVERITY_CRITICAL, "Takeoff blocked: pits side unknown");
         return false;
     }
+    // confirm the guard: where it thinks the pits are, and where it will circle
+    gcs().send_text(MAV_SEVERITY_INFO, "Takeoff: pits %.0fm %s, circle on %s", offset_m,
+                    pits < 0 ? "left" : "right", pits < 0 ? "right" : "left");
     return true;
 }
 
@@ -904,243 +1062,29 @@ bool ModeAutoLand::is_landing() const
     return (plane.flight_stage == AP_FixedWing::FlightStage::LAND);
 }
 
-#if AP_BARO_THST_COMP_ENABLED
 /*
-  AUTOLAND_BAROLRN: the first second or two of a ground TAKEOFF is a free
-  static run-up. The aircraft can't change height while it stands still, so
-  any rise in the raw BARO1 pressure as the throttle comes up is the error
-  that BARO1_THST_SCALE compensates (prop wash pressurising the fuselage).
-  Fit a line through the origin of pressure rise against throttle and update
-  BARO1_THST_SCALE with it.
- */
-void ModeAutoLand::baro_learn_takeoff_start(void)
-{
-    if (baro_learn <= 0 || !runway_options_enabled() || plane.is_flying() ||
-        baro_lrn.state != BaroLearnState::IDLE) {
-        return;
-    }
-    baro_lrn.state = BaroLearnState::WAIT;
-}
-
-void ModeAutoLand::baro_learn_update(void)
-{
-    const uint32_t now = AP_HAL::millis();
-    if (now - baro_lrn.last_ms < 50) {
-        // 20 Hz
-        return;
-    }
-    baro_lrn.last_ms = now;
-
-    AP_Baro &baro = AP::baro();
-    if (!hal.util->get_soft_armed()) {
-        if (baro_lrn.save_pending) {
-            baro.get_thrust_scale().save();
-            baro_lrn.save_pending = false;
-        }
-        baro_lrn.state = BaroLearnState::IDLE;
-        baro_lrn.base_n = 0;
-        return;
-    }
-
-    // forward acceleration, filtered (about 1 Hz) against vibration
-    const Vector3f &accel = plane.ahrs.get_accel_ef();
-    const float yaw = plane.ahrs.get_yaw_rad();
-    const float accel_fwd = accel.x * cosf(yaw) + accel.y * sinf(yaw);
-    baro_lrn.accel_fwd += 0.3f * (accel_fwd - baro_lrn.accel_fwd);
-
-    const float thr = baro.get_forward_throttle();
-    const float gs = plane.gps.ground_speed();
-    const bool baro_ok = baro.healthy(0);
-    const float press = baro.get_pressure(0);   // raw, before thrust/wind compensation
-    const bool parked = baro_ok && !plane.is_flying() && gs < 0.5f && thr < 0.05f;
-
-    if (baro_lrn.state == BaroLearnState::WAIT || baro_lrn.state == BaroLearnState::SAMPLING) {
-        if (plane.control_mode != &plane.mode_takeoff) {
-            // TAKEOFF left before the run-up was measured
-            baro_lrn.state = BaroLearnState::DONE;
-            return;
-        }
-    }
-
-    switch (baro_lrn.state) {
-    case BaroLearnState::IDLE:
-    case BaroLearnState::WAIT:
-        if (parked) {
-            // keep the last second of parked pressure as the baseline
-            baro_lrn.base[baro_lrn.base_idx] = press;
-            baro_lrn.base_idx = (baro_lrn.base_idx + 1) % BARO_LEARN_BASE_LEN;
-            baro_lrn.base_n = MIN(baro_lrn.base_n + 1, BARO_LEARN_BASE_LEN);
-            break;
-        }
-        if (baro_lrn.state == BaroLearnState::IDLE) {
-            baro_lrn.base_n = 0;
-            break;
-        }
-        // WAIT: the throttle is coming up (or the aircraft moved)
-        if (baro_lrn.base_n < BARO_LEARN_BASE_LEN / 2 || !baro_ok || plane.is_flying() || gs >= 0.5f) {
-            // less than 0.5 s parked with the motor at idle just before
-            baro_lrn.n = 0;
-            baro_lrn.base_sd = 0;
-            baro_lrn.state = BaroLearnState::DONE;
-            gcs().send_text(MAV_SEVERITY_INFO, "Baro: no still baseline, not learned");
-#if HAL_LOGGING_ENABLED
-            AP::logger().WriteCritical("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
-                               AP_HAL::micros64(), 0, 0.0f, thr, 0.0f, baro.get_thrust_scale().get(),
-                               baro.get_thrust_scale().get(), 0.0f, uint8_t(BaroLearnResult::NO_BASELINE));
-#endif
-            break;
-        }
-        {
-            // baseline: median and standard deviation of the parked samples
-            float sorted[BARO_LEARN_BASE_LEN];
-            const uint8_t n = baro_lrn.base_n;
-            float mean = 0;
-            for (uint8_t i = 0; i < n; i++) {
-                sorted[i] = baro_lrn.base[i];
-                mean += sorted[i];
-            }
-            mean /= n;
-            float var = 0;
-            for (uint8_t i = 0; i < n; i++) {
-                var += sq(sorted[i] - mean);
-                for (uint8_t j = i; j > 0 && sorted[j] < sorted[j-1]; j--) {
-                    const float t = sorted[j];
-                    sorted[j] = sorted[j-1];
-                    sorted[j-1] = t;
-                }
-            }
-            baro_lrn.base_sd = sqrtf(var / n);
-            baro_lrn.baseline = (n & 1) ? sorted[n/2] : 0.5f * (sorted[n/2 - 1] + sorted[n/2]);
-        }
-        baro_lrn.n = 0;
-        baro_lrn.n_fit = 0;
-        baro_lrn.sum_tp = 0;
-        baro_lrn.sum_tt = 0;
-        baro_lrn.thr_min = 1;
-        baro_lrn.thr_max = 0;
-        baro_lrn.start_ms = now;
-        baro_lrn.end_ms = now;
-        baro_lrn.state = BaroLearnState::SAMPLING;
-        FALLTHROUGH;
-
-    case BaroLearnState::SAMPLING:
-        if (!baro_ok || plane.is_flying() || gs >= 0.8f || baro_lrn.accel_fwd >= 1.0f ||
-            (baro_lrn.n > 0 && now - baro_lrn.start_ms > 10000)) {
-            // started rolling (or 10 s held still): the run-up is over
-            baro_learn_finish();
-            break;
-        }
-        {
-            const float dp = press - baro_lrn.baseline;
-            if (baro_lrn.n == 0) {
-                baro_lrn.start_ms = now;
-            }
-            baro_lrn.end_ms = now;
-            baro_lrn.n++;
-            baro_lrn.thr_min = MIN(baro_lrn.thr_min, thr);
-            baro_lrn.thr_max = MAX(baro_lrn.thr_max, thr);
-            if (thr >= 0.25f) {
-                baro_lrn.sum_tp += thr * dp;
-                baro_lrn.sum_tt += thr * thr;
-                baro_lrn.n_fit++;
-            }
-        }
-        break;
-
-    case BaroLearnState::DONE:
-        break;
-    }
-}
-
-void ModeAutoLand::baro_learn_finish(void)
-{
-    baro_lrn.state = BaroLearnState::DONE;
-
-    AP_Float &scale = AP::baro().get_thrust_scale();
-    const float old_scale = scale.get();
-    const float dur = (baro_lrn.end_ms - baro_lrn.start_ms) * 0.001f;
-    float measured = 0;
-    BaroLearnResult res = BaroLearnResult::ACCEPTED;
-    if (baro_lrn.n < 2 || dur < 1.0f || baro_lrn.thr_max < 0.35f ||
-        baro_lrn.thr_max - baro_lrn.thr_min < 0.2f || baro_lrn.n_fit < 3) {
-        res = BaroLearnResult::TOO_SHORT;
-    } else if (baro_lrn.base_sd >= 4.0f) {
-        res = BaroLearnResult::TOO_NOISY;
-    } else {
-        measured = baro_lrn.sum_tp / baro_lrn.sum_tt;
-        if (fabsf(measured) > 150.0f) {
-            res = BaroLearnResult::OUT_OF_RANGE;
-        }
-    }
-
-    float new_scale = old_scale;
-    switch (res) {
-    case BaroLearnResult::ACCEPTED:
-        // first measurement taken as is, then half way each takeoff
-        new_scale = is_zero(old_scale) ? measured : old_scale + 0.5f * (measured - old_scale);
-        // applied now, for the rest of the roll and the climb; saved at disarm
-        scale.set_and_notify(new_scale);
-        baro_lrn.save_pending = true;
-        gcs().send_text(MAV_SEVERITY_INFO, "Baro: throttle scale %.0f Pa (measured %.0f, was %.0f)",
-                        new_scale, measured, old_scale);
-        break;
-    case BaroLearnResult::TOO_SHORT:
-        gcs().send_text(MAV_SEVERITY_INFO, "Baro: run-up too short, not learned");
-        break;
-    case BaroLearnResult::TOO_NOISY:
-        gcs().send_text(MAV_SEVERITY_INFO, "Baro: run-up too noisy, not learned");
-        break;
-    case BaroLearnResult::OUT_OF_RANGE:
-        gcs().send_text(MAV_SEVERITY_INFO, "Baro: run-up out of range, not learned");
-        break;
-    case BaroLearnResult::NO_BASELINE:
-        break;
-    }
-
-#if HAL_LOGGING_ENABLED
-    // @LoggerMessage: BTLN
-    // @Description: AUTOLAND_BAROLRN: baro thrust error measured on the takeoff run-up
-    // @Field: TimeUS: Time since system startup
-    // @Field: N: run-up samples (20 Hz)
-    // @Field: Dur: run-up duration
-    // @Field: ThMx: highest throttle during the run-up (0 to 1)
-    // @Field: Meas: measured pressure rise at full throttle, Pa
-    // @Field: Old: BARO1_THST_SCALE before
-    // @Field: New: BARO1_THST_SCALE after
-    // @Field: BSd: standard deviation of the parked baseline, Pa
-    // @Field: Res: 0 accepted, 1 run-up too short, 2 too noisy, 3 out of range, 4 no still baseline
-    AP::logger().WriteCritical("BTLN", "TimeUS,N,Dur,ThMx,Meas,Old,New,BSd,Res", "s-s------", "F-0------", "QHffffffB",
-                       AP_HAL::micros64(), baro_lrn.n, dur, baro_lrn.thr_max, measured, old_scale,
-                       new_scale, baro_lrn.base_sd, uint8_t(res));
-#endif
-}
-#endif  // AP_BARO_THST_COMP_ENABLED
-
-/*
-  AUTOLAND_TDLRN: the landing aims AUTOLAND_TD_OFS short of the roll start.
-  Where it really touches down, measured along the runway line, tells how far
-  it floats after the flare. Set AUTOLAND_TD_OFS to that float so the next
-  landing touches down at the roll start.
+  Touchdown report: the landing aims AUTOLAND_TD_OFS short of the roll start.
+  Where it really touches down, measured along the runway line from the roll
+  start, is reported (and logged, TDLN) so the pilot can adjust AUTOLAND_TD_OFS.
+  Nothing is changed automatically: a touchdown point moved by a height error,
+  wind or a pilot correction is not the float, and learning from it walks the
+  offset away.
 
   Touchdown, after the flare starts: the rangefinder tiers of touchdown_update()
   (ground visible, or blind zone), at the position where their condition
   started; otherwise the point where the sink stops for good (EKF sink rate
   below 0.3 m/s for 1.5 s), taken at the first impact on the accelerometer
-  (0.25 g above 1 g) there if there is one. The baro isn't used: its remaining
-  airspeed error is what makes the landing float. A bounce (climbing at
-  0.7 m/s) waits for the next contact. 2 s down without a bounce confirms it.
+  (0.25 g above 1 g) there if there is one. The baro isn't used. A bounce
+  (climbing at 0.7 m/s) waits for the next contact. 2 s down without a bounce
+  confirms it.
  */
 void ModeAutoLand::td_learn_update(void)
 {
     if (!hal.util->get_soft_armed()) {
         if (td_lrn.state == TdLearnState::TOUCHED) {
-            td_learn_finish(TdLearnResult::ACCEPTED);
+            td_learn_finish(TdLearnResult::REPORTED);
         } else if (td_lrn.state == TdLearnState::WATCH && stage == AutoLandStage::LANDING) {
             td_learn_finish(TdLearnResult::NOT_SEEN);
-        }
-        if (td_lrn.save_pending) {
-            td_offset.save();
-            td_lrn.save_pending = false;
         }
         td_lrn.state = TdLearnState::IDLE;
         return;
@@ -1162,11 +1106,9 @@ void ModeAutoLand::td_learn_update(void)
     }
 
     // elevator input, or the throttle stick above 60%, from the start of the final
-    // to the confirmed touchdown. The throttle stick only acts in AUTOLAND above
-    // half way (THROTTLE_NUDGE), so 0-60% is ignored: wherever a non-centring
-    // throttle rests, any reduction, and a small bump while using the rudder.
-    // Aileron and rudder corrections only change the direction and are allowed (a
-    // touchdown more than 15m off the runway line is still rejected)
+    // to the confirmed touchdown, flagged in the log (TDLN.PIn). The throttle
+    // stick only acts in AUTOLAND above half way (THROTTLE_NUDGE), so 0-60% is
+    // ignored. Aileron and rudder corrections only change the direction.
     if (abs(plane.channel_pitch->get_control_in()) > 450 ||
         (plane.g.throttle_nudge && plane.channel_throttle->get_control_in() > 60)) {
         td_lrn.pilot_input = true;
@@ -1241,7 +1183,7 @@ void ModeAutoLand::td_learn_update(void)
     }
     td_lrn.accel = MAX(td_lrn.accel, accel_up);
     if (now - td_lrn.touch_ms > 2000) {
-        td_learn_finish(TdLearnResult::ACCEPTED);
+        td_learn_finish(TdLearnResult::REPORTED);
     }
 }
 
@@ -1262,62 +1204,36 @@ void ModeAutoLand::td_learn_finish(TdLearnResult res)
     // the float: distance from the aim point to the touchdown
     const float floated = along + td_lrn.aim_ofs;
 
-    if (res == TdLearnResult::ACCEPTED) {
-        if (td_lrn.pilot_input) {
-            res = TdLearnResult::PILOT_INPUT;
-        } else if (fabsf(side) > 15.0f) {
-            res = TdLearnResult::OFF_LINE;
-        } else if (floated < -50.0f || floated > 100.0f) {
-            res = TdLearnResult::OUT_OF_RANGE;
-        }
-    }
-
-    const int16_t old_ofs = td_lrn.aim_ofs;
-    int16_t new_ofs = td_offset.get();
     switch (res) {
-    case TdLearnResult::ACCEPTED: {
-        // first measurement taken as is, then half way each landing
-        const float ofs = (old_ofs == 0) ? floated : old_ofs + 0.5f * (floated - old_ofs);
-        new_ofs = constrain_int16(lroundf(ofs), 0, 50);
-        // used from the next AUTOLAND; saved at disarm
-        td_offset.set_and_notify(new_ofs);
-        td_lrn.save_pending = true;
-        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %+.0fm from roll start, TD_OFS %d (was %d)",
-                        along, new_ofs, old_ofs);
-        break;
-    }
-    case TdLearnResult::PILOT_INPUT:
-        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: elevator/throttle input, TD_OFS not learned");
-        break;
-    case TdLearnResult::OFF_LINE:
-        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %.0fm off the runway line, TD_OFS not learned", side);
-        break;
-    case TdLearnResult::OUT_OF_RANGE:
-        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %+.0fm from roll start, TD_OFS not learned", along);
-        break;
-    case TdLearnResult::MODE_CHANGE:
-        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: mode change, TD_OFS not learned");
+    case TdLearnResult::REPORTED:
+        // AUTOLAND_TD_OFS is the pilot's to change; each message within 50 characters.
+        // The suggestion moves the aim by the error: + past the roll start raises it
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown %+.0fm from roll start", along);
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: suggest AUTOLAND_TD_OFS %d (now %d)",
+                        int(constrain_float(roundf(td_lrn.aim_ofs + along), -50.0f, 100.0f)), td_lrn.aim_ofs);
         break;
     case TdLearnResult::NOT_SEEN:
-        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown not seen, TD_OFS not learned");
+        gcs().send_text(MAV_SEVERITY_INFO, "Autoland: touchdown not seen");
+        break;
+    case TdLearnResult::MODE_CHANGE:
         break;
     }
 
 #if HAL_LOGGING_ENABLED
     // @LoggerMessage: TDLN
-    // @Description: AUTOLAND_TDLRN: where the landing touched down
+    // @Description: AUTOLAND: where the landing touched down
     // @Field: TimeUS: Time since system startup
     // @Field: Along: touchdown along the runway line from the roll start, positive past it
     // @Field: Side: touchdown distance from the runway line, positive right
     // @Field: Flt: float, from the aim point to the touchdown
     // @Field: Acc: highest vertical acceleration above 1 g in the 2 s after the touchdown
-    // @Field: Old: AUTOLAND_TD_OFS the landing was aimed with
-    // @Field: New: AUTOLAND_TD_OFS after
+    // @Field: Ofs: AUTOLAND_TD_OFS the landing was aimed with
     // @Field: Src: touchdown seen by 0 the sink stopping (accelerometer), 1 the rangefinder seeing the ground, 2 the rangefinder blind zone
-    // @Field: Res: 0 accepted, 1 elevator input or throttle stick above 60%, 2 off the runway line, 3 out of range, 4 mode change, 5 touchdown not seen
-    AP::logger().WriteCritical("TDLN", "TimeUS,Along,Side,Flt,Acc,Old,New,Src,Res", "smmmomm--", "F000000--", "QffffhhBB",
-                       AP_HAL::micros64(), along, side, floated, td_lrn.accel, old_ofs, new_ofs,
-                       td_lrn.source, uint8_t(res));
+    // @Field: PIn: 1 if the pilot moved the elevator or raised the throttle stick above 60% on the final
+    // @Field: Res: 0 reported, 1 mode change before the touchdown, 2 touchdown not seen
+    AP::logger().WriteCritical("TDLN", "TimeUS,Along,Side,Flt,Acc,Ofs,Src,PIn,Res", "smmmom---", "F000000--", "QffffhBBB",
+                       AP_HAL::micros64(), along, side, floated, td_lrn.accel, td_lrn.aim_ofs,
+                       td_lrn.source, uint8_t(td_lrn.pilot_input), uint8_t(res));
 #endif
 }
 

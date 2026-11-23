@@ -119,7 +119,7 @@ def read_results(out):
         if f.name.endswith('.removed.tsv'):
             continue
         fields = f.read_text(encoding='utf-8').rstrip('\n').split('\t')
-        rows.append((fields + [''] * 8)[:8])
+        rows.append((fields + [''] * 7)[:7])
     return rows
 
 
@@ -149,12 +149,11 @@ def main():
     rows = read_results(out) if out.is_dir() else []
     if not rows:
         fail('no results: see the output above%s' % (' (exit code %d)' % rc if rc else ''))
-    print('  %-24s %-6s %-12s %-5s %12s %12s  %s' % ('Board', 'Status', 'Build', 'Baro', 'Flash used', 'Flash free',
-                                                     'Note'))
+    print('  %-24s %-6s %-12s %12s %12s  %s' % ('Board', 'Status', 'Build', 'Flash used', 'Flash free', 'Note'))
     failed = False
-    for board, status, build, used, free, files, reason, baro in rows:
+    for board, status, build, used, free, files, reason in rows:
         failed |= status != 'ok'
-        print('  %-24s %-6s %-12s %-5s %12s %12s  %s' % (board, status, build, baro, used, free, reason))
+        print('  %-24s %-6s %-12s %12s %12s  %s' % (board, status, build, used, free, reason))
     files = sorted((out / 'files').glob('*')) if (out / 'files').is_dir() else []
     if files:
         print('\n  Files:')

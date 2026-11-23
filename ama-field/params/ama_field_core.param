@@ -14,28 +14,26 @@ AUTOLAND_WP_ALT,20
 AUTOLAND_WP_DIST,100
 # FIELD: gap between the extended centreline and the base circle, metres
 AUTOLAND_SIDEGAP,5
-# AIRFRAME: start the descent this many degrees before lined up on final (0 = level until lined up)
-AUTOLAND_DSC_ARC,90
+# FIELD/AIRFRAME: start the even circle descent this many degrees before lined up on final:
+# 180 = as the turn from downwind begins (the base circle must be clear down to
+# AUTOLAND_FNL_HGT; 0 = level until lined up)
+AUTOLAND_DSC_ARC,180
+# FIELD/AIRFRAME: height at the start of the final, reached 60 degrees before lined up and held
+# level to the final; the final glides from it to the touchdown aim (8 m over 100 m is ~4.6 deg)
+AUTOLAND_FNL_HGT,8
 # AIRFRAME: rollout steering multiplier; start at 1, raise if it swings off as it slows
 AUTOLAND_RO_GAIN,1
-# AUTOLAND_TD_OFS (touchdown aim short of the roll start, for the float after the
-# flare) is deliberately not set here: the firmware default is a typical float, 20 m
-# (30 m on a board without baro compensation), and AUTOLAND_TDLRN refines it. If an
-# older setup saved 0, reset it to the default. Allow for up to 50 m in the fence.
-# learn AUTOLAND_TD_OFS on every AUTOLAND without elevator input or the throttle stick
-# above 60% (0-60% is ignored), saved at disarm
-AUTOLAND_TDLRN,1
+# AIRFRAME: touchdown aim short of the roll start, for the float after the flare. Each
+# landing reports where it touched down and suggests a value ("Autoland: suggest AUTOLAND_TD_OFS 29
+# (now 25)"): set it by hand from a few landings
+AUTOLAND_TD_OFS,25
 AUTOLAND_DIR_OFF,0
 AUTOLAND_CLIMB,0
 #
-# --- baro compensation (TUNING.md section 4) ---
-# AIRFRAME: Pa at full throttle; 0 = measured on the first auto takeoff (AUTOLAND_BAROLRN)
+# --- no baro compensation: vent a pressurised fuselage instead (TUNING.md section 4) ---
+# (only some boards have these two; where they are missing the loader just skips them)
 BARO1_THST_SCALE,0
-# learn BARO1_THST_SCALE on every auto takeoff, saved at disarm
-AUTOLAND_BAROLRN,1
-BARO1_WCF_ENABLE,1
-# AIRFRAME: airspeed part; start at 0, set from baro_throttle.py after a landing
-BARO1_WCF_FWD,0
+BARO1_WCF_ENABLE,0
 #
 # --- runway circle is the RTL point; no rally points ---
 RTL_AUTOLAND,0
@@ -58,10 +56,12 @@ FENCE_ALT_MAX,120
 CRUISE_ALT_FLOOR,20
 #
 # --- landing basics (refine per airframe, TUNING.md section 7) ---
-LAND_FLARE_SEC,1.5
+LAND_FLARE_SEC,2
 LAND_FLARE_ALT,2
 LAND_DISARMDELAY,20
 TECS_LAND_SINK,0.5
+# limit nose-down pitch in the automatic modes: no part of the approach can become a dive
+TECS_PITCH_MIN,-12
 #
 # --- rangefinder (optional). Leave as is with no rangefinder fitted. ---
 # With a downward rangefinder fitted and configured, set RNGFND_LANDING 1.

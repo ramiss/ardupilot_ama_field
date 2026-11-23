@@ -1,6 +1,5 @@
 # Boards that must always be built exactly from their own hwdef, never with a
 # trim-tier overlay, even if they stop fitting. One hwdef name per line.
 
-# The flight-tested board; it must match the hand-built v16 configuration plus the
-# baro compensation its hwdef has from v17 (field-mode.hwdef changes nothing on it).
+# The flight-tested board; it must match the hand-built v16 configuration.
 FlyingRCF4WingMini

@@ -42,25 +42,9 @@ On 1 MB boards, check the build fits. The custom code is small, but ArduPilot's
 Release binaries are built by CI for the boards in `ama-field/ci/boards.txt` (see
 [Release CI](#release-ci)), with ArduPilot's standard 10-2020-q4-major toolchain.
 Releases up to v16 were built by hand for the **FlyingRC F4Wing Mini** only, with
-the xPack `arm-none-eabi-gcc` 10.3.1-2.3 toolchain; either toolchain works. On
-that board v17 uses 880,232 of 983,040 bytes (CI toolchain, 102,808 free): about
-7.7 KB more than v16 for the baro compensation, the takeoff and touchdown learning
-and the rangefinder handling. The tightest board in `boards.txt`, the JHEMCU F405
-Wing, still fits at stock with 484 bytes free.
-
-**Baro compensation in your own build.** The field mode expects baro thrust and
-wind compensation (`AP_BARO_THST_COMP_ENABLED`, `HAL_BARO_WIND_COMP_ENABLED`).
-Thrust compensation is off by default on every board, and most 1 MB boards turn
-wind compensation off. The release builds add them with
-[`ama-field/ci/field-mode.hwdef`](../ci/field-mode.hwdef); do the same:
-
-```bash
-./waf configure --board <YourBoard> --extra-hwdef=ama-field/ci/field-mode.hwdef
-```
-
-Without them the build has no baro compensation and its landings rely on the learned
-`AUTOLAND_TD_OFS` alone (see [TUNING.md](TUNING.md#44-boards-without-baro-compensation)).
-The FlyingRC F4Wing Mini and SITL hwdefs already have both.
+the xPack `arm-none-eabi-gcc` 10.3.1-2.3 toolchain; either toolchain works. Flash
+use on that board is in the version history below. The tightest board in
+`boards.txt`, the JHEMCU F405 Wing, fitted at stock with 484 bytes free in v17.
 
 ### FlyingRC F4Wing Mini specifics
 
@@ -104,25 +88,13 @@ Release. It runs in ArduPilot's own build container
 No workflow edit is needed. An unknown board name stops the run at the first job,
 before anything is built.
 
-### Baro compensation and trimmed builds for 1 MB boards
+### Trimmed builds for 1 MB boards
 
-Every build gets [`field-mode.hwdef`](../ci/field-mode.hwdef), which turns on baro
-thrust and wind compensation, through `./waf configure --board <B> --extra-hwdef=...`.
-The board's own hwdef files are never edited. Per board, the first build that fits
-is shipped:
-
-1. the board's own hwdef ("stock") + `field-mode.hwdef`;
-2. trim tier 1 + `field-mode.hwdef`;
-3. trim tier 2 + `field-mode.hwdef`;
-4. trim tier 2 alone. This build has no baro compensation; the learned
-   `AUTOLAND_TD_OFS` takes up the larger float.
-
-Steps 2–4 are only for a 1 MB board that isn't in `no_trim.txt`. Any other board
-tries its own hwdef without `field-mode.hwdef` as step 2. `extract_features.py` on
-every shipped binary decides the "Baro comp" column (yes = both compensations
-compiled in). The trim tiers and `field-mode.hwdef` are combined into one overlay at
-build time, because `--extra-hwdef` takes one file. On the test boards the
-compensation, with `AUTOLAND_BAROLRN`, costs 2,976 bytes in a tier 2 build.
+Every board is built from its own hwdef first ("stock"). A 1 MB board that doesn't
+fit, and isn't listed in `no_trim.txt`, is rebuilt with trim tier 1, then trim tier
+2, through `./waf configure --board <B> --extra-hwdef=...`, stopping at the first
+that fits. The board's own hwdef files are never edited. 2 MB boards are never
+trimmed.
 
 A ChibiOS build that is too big fails to link with "cannot move location counter
 backwards (from <end of code> to <end of flash>)", from the crash log section at the
@@ -138,9 +110,7 @@ from either message.
   - boards with more than 1 MB of flash;
   - boards listed in [`ama-field/ci/no_trim.txt`](../ci/no_trim.txt). That
     includes the FlyingRC F4Wing Mini, which must match the flight-tested build.
-    Its hwdef already has both baro compensations, so `field-mode.hwdef` changes
-    nothing on it. Compared with v16 its feature list differs only by those two.
-- **If tier 2 without baro compensation still doesn't fit,** AMA field mode itself
+- **If tier 2 still doesn't fit,** AMA field mode itself
   doesn't fit. The board is "not available", and the summary says how many bytes it
   was over.
 - **Editing the tiers:** the overlays are generated from `TRIM_TIERS` in
@@ -149,8 +119,7 @@ from either message.
   - Labels are feature labels from `Tools/scripts/build_options.py`. Everything
     that depends on a label is turned off with it.
   - The first CI job fails if the committed `.hwdef` files are out of date with
-    this tree, if a tier names a baro compensation define, or if
-    `field-mode.hwdef` turns on anything other than the two baro compensations.
+    this tree.
 - **Safety checks:**
   - `overlays` refuses to name anything that AMA field mode or a basic setup
     needs: AUTOLAND, fence, GPS, compass, baro, rangefinder, airspeed, logging,
@@ -161,8 +130,7 @@ from either message.
   - The features that did go from on to off are the board's "removed" list in
     the release notes.
   - The only allowed exceptions are the battery-monitor backends that read from
-    an EFI unit or a generator, and the baro compensation in step 4. That shows in
-    the "Baro comp" column, not in the removed list.
+    an EFI unit or a generator.
 - **No trim needed for core modes:** TAKEOFF, FBWA, FBWB, CRUISE, LOITER, RTL,
   MANUAL, GUIDED and Plane autotune aren't optional at compile time in 4.7.2, so
   no overlay can remove them.
@@ -202,7 +170,7 @@ Open the run in the *Actions* tab. The summary page shows:
 
 - one table per batch (`build b01`, `b02`, ...);
 - a combined table with every board, its status, its build (stock, tier 1 or
-  tier 2), whether it has baro compensation, and flash used and free (the `.apj`
+  tier 2), and flash used and free (the `.apj`
   image size and free flash, the same numbers Mission Planner reports);
 - a collapsible list of the removed features for every trimmed board.
 
@@ -216,8 +184,8 @@ reasons:
 
 | Reason | Meaning |
 |---|---|
-| `does not fit even with tier 2 and no baro compensation: N bytes over` | A 1 MB board that is still N bytes too big after every step: AMA field mode itself doesn't fit. Making it fit needs a further tier, which is a deliberate decision, not a CI fix. |
-| `does not fit: N bytes over, M without baro compensation (not trimmed: ...)` | A board that is never trimmed (more than 1 MB, or in `no_trim.txt`) no longer fits, even without `field-mode.hwdef`. |
+| `does not fit even with tier 2: N bytes over` | A 1 MB board that is still N bytes too big after every step: AMA field mode itself doesn't fit. Making it fit needs a further tier, which is a deliberate decision, not a CI fix. |
+| `does not fit: N bytes over (not trimmed: ...)` | A board that is never trimmed (more than 1 MB, or in `no_trim.txt`) no longer fits. |
 | `tierN fits but the trim check failed` | The trimmed build would remove a protected feature, so it isn't shipped. Read `probe/<Board>.<step>.diff` in the batch artifact. |
 | `build error` | Compile or configure error. Download the batch artifact (`ama-field-b0N`) and read `logs/<Board>.log`. |
 | `build job did not finish` | The whole batch job failed or timed out. Look at that job's log. |
@@ -233,44 +201,25 @@ The run fails, and no release is made, only if no board built at all.
 export ARDUPILOT_ROOT=$PWD ARDUPLANE_SITL=$PWD/build/sitl/bin/arduplane
 pip install pymavlink numpy
 
-# full circuit: takeoff, runway circle, AUTOLAND in a 6 m/s crosswind
+# full circuit: takeoff, runway circle, AUTOLAND in a 6 m/s crosswind, with the
+# even circle descent and the gentle final
 python3 ama-field/sitl/autoland_circuit_test.py /tmp/run1 wind=6 wdir=83 l1=13 lvl=10 \
-    wpd=85 wpalt=20 gap=5 arc=90 rog=3 ls=0.6 fa=2 fs=1 alt=22
+    wpd=85 wpalt=20 gap=5 arc=180 fnl=8 rog=3 ls=0.6 fa=2 fs=2 alt=22 tdo=25 rfprof=mt06
 python3 ama-field/sitl/analyze_final.py /tmp/run1      # circle size, overshoot, touchdown
 python3 ama-field/sitl/circuit_profile.py /tmp/run1    # height around the circuit
 python3 ama-field/sitl/analyze_loiter.py /tmp/run1     # runway-circle geometry
 
-# baro error and compensation: simulated prop-wash and airspeed error, starting values,
-# takeoff learning on a held run-up; then the baro checks from the dataflash log
-python3 ama-field/sitl/autoland_circuit_test.py /tmp/run4 thst=50 wcf=0.15 bts=0 bwcf=0.15 \
-    lrn=1 slew=20 hold=3 wind=6 wdir=83 l1=13 lvl=10 wpd=85 wpalt=20 gap=5 arc=90 rog=3 \
-    ls=0.6 fa=2 fs=1 alt=22
-python3 ama-field/sitl/baro_check.py /tmp/run4          # BTLN, run-up, airborne error
-# repeat with wipe=0 (same directory) to watch BARO1_THST_SCALE converge
-
-# thrust compensation on the ground: altitude shift with throttle, nothing disarmed
-python3 ama-field/sitl/baro_thrust_test.py /tmp/run5
-
 # one takeoff per arming
-python3 ama-field/sitl/autoland_circuit_test.py /tmp/run2 block=1 arc=90
+python3 ama-field/sitl/autoland_circuit_test.py /tmp/run2 block=1 arc=180 fnl=8
 
 # pits detection, arming block, fence bounce-back in FBWB
 python3 ama-field/sitl/pits_fence_test.py /tmp/run3 fallback FBWB
 ```
 
-The SITL build has both baro compensations (`libraries/AP_HAL_SITL/hwdef/sitl/hwdef.dat`).
-Every run learns `AUTOLAND_TD_OFS` (`tdl=0` turns it off, `tdo=` sets a start value);
-repeat runs with `wipe=0` to watch it converge. To test a board without baro
-compensation, build with both off:
-
-```bash
-printf 'undef AP_BARO_THST_COMP_ENABLED\ndefine AP_BARO_THST_COMP_ENABLED 0\nundef HAL_BARO_WIND_COMP_ENABLED\ndefine HAL_BARO_WIND_COMP_ENABLED 0\n' > /tmp/nocomp.hwdef
-./waf configure --board sitl --extra-hwdef=/tmp/nocomp.hwdef && ./waf plane
-```
-
 - The SITL aircraft is ArduPilot's stock plane model. Try your own aircraft's speeds
   and tuning with the script options:
-  - `wpd` / `wpalt` / `gap` / `tdo` / `tdl` / `arc` / `rog`: `AUTOLAND_*`
+  - `wpd` / `wpalt` / `gap` / `tdo` / `arc` / `fnl` / `rog`: `AUTOLAND_*`
+  - `pmin`: `TECS_PITCH_MIN`
   - `l1`: `NAVL1_PERIOD`
   - `ls`: `TECS_LAND_SINK`
   - `fa` / `fs`: `LAND_FLARE_ALT` / `_SEC`
@@ -288,12 +237,8 @@ printf 'undef AP_BARO_THST_COMP_ENABLED\ndefine AP_BARO_THST_COMP_ENABLED 0\nund
   - `python3 ama-field/sitl/rf_matrix.py RUNDIR ...` tabulates rangefinder runs
     against the simulator's truth: engagement height, flare source, touchdown
     detection tier and delay, touchdown point, and landing-height steps
-  - `thst` / `wcf`: simulated baro error from throttle (`SIM_BARO_THST`, Pa at full
-    throttle) and airspeed (`SIM_BARO_WCF_FWD`)
-  - `bts` / `bwcf` / `lrn`: `BARO1_THST_SCALE`, `BARO1_WCF_FWD`, `AUTOLAND_BAROLRN`
-  - `slew`: `TKOFF_THR_SLEW`; `hold=3`: hold the aircraft still for the first 3 s
-    of TAKEOFF, because the SITL plane has no static friction and rolls at about
-    10% throttle, too early for the baro learning
+  - `wcf`: simulated baro error from airspeed (`SIM_BARO_WCF_FWD`, stock SITL)
+  - `slew`: `TKOFF_THR_SLEW`
   - `wipe=0`: keep the parameters saved by the previous run in the same directory
 - Run several at once with `inst=0`, `inst=1`, and so on.
 - The test sets `RC_OVERRIDE_TIME` -1. At 8× speed, a pause of under half a second
@@ -314,8 +259,7 @@ All in `ama-field/log-analysis/` (Python 3 + pymavlink):
 | `flight_review.py LOG.BIN` | Modes, messages, events, GPS and battery summary. |
 | `flight_table.py LOG.BIN [step] [t0] [t1]` | Timeline table: altitude, speeds, attitude, throttle, servos, distance. |
 | `landing_trace.py LOG.BIN t0 t1` | Approach and flare trace: height vs demand, distance, speed, sink, pitch. |
-| `baro_throttle.py [--replay] [--models] LOG.BIN ...` | Baro error from throttle and airspeed: the takeoff run-up, near-ground flight against strong rangefinder readings, and airborne fits. Suggests `BARO1_THST_SCALE` and `BARO1_WCF_FWD` (current + increment). `--replay` runs the `AUTOLAND_BAROLRN` learning on each takeoff; `--models` compares throttle models. See [TUNING.md](TUNING.md#4-barometer-compensation). |
-| `baro_err.py LOG.BIN ...` | Baro error against strong rangefinder readings, by flight phase. |
+| `baro_err.py LOG.BIN ...` | Baro error against strong rangefinder readings, by flight phase. See [TUNING.md](TUNING.md#41-the-barometer-must-read-true-height). |
 | `rf_gate_sim3.py LOG.BIN t0 t1` | Replays the rangefinder plausibility gate on a log (quality from `RFSS.Q`, `RNGFND1_MAX` from the log). |
 | `rf_engage_replay.py [--scan] LOG.BIN ...` | Rangefinder engagement on each landing from the raw `RFSS` samples: the stock rule, v17's 3 strong samples and the AUTOLAND-final consistency rule, with a check that each engagement is sustained. `--scan` stress-tests the rules over the whole flight. Sensor agnostic (`RFSS.Q`, or MT-06 strength / 255 in older logs). |
 | `params_of.py LOG.BIN NAME ...` | Parameter values recorded in a log. |
@@ -335,12 +279,10 @@ These log messages are the most useful:
   and what the stock correction rule would give;
 - `TDET`: touchdown detection (tier, delay, landing height, vertical speed, last
   good rangefinder reading);
-- `BTLN`: the baro learning on each takeoff (samples, top throttle, measured, old
-  and new `BARO1_THST_SCALE`, baseline noise, result). It is logged whatever
-  `LOG_BITMASK` is;
-- `TDLN`: the touchdown offset learning on each landing (touchdown along and across
-  the runway line, float, impact, old and new `AUTOLAND_TD_OFS`, accelerometer or
-  rangefinder, result). Also logged whatever `LOG_BITMASK` is;
+- `TDLN`: the touchdown report on each landing (touchdown along and across the
+  runway line, float from the aim point, impact, the `AUTOLAND_TD_OFS` it was aimed
+  with, accelerometer or rangefinder, pilot input on the final, result). Logged
+  whatever `LOG_BITMASK` is;
 - `MSG`: every field-mode message is logged.
 
 `RFSS` is a streaming message, so with MAVLink logging it is limited to
@@ -355,10 +297,10 @@ test.
 
 | File | Change |
 |---|---|
-| `ArduPlane/mode_autoland.cpp`, `mode.h` | The main part. It holds:<ul><li>the pits reference;</li><li>roll start and runway direction capture, including the veer fallback;</li><li>the runway circle;</li><li>circuit side, height selection and base circle sizing;</li><li>the level circuit, descent arc and glide path by distance;</li><li>touchdown aim offset (`TD_OFS`);</li><li>touchdown detection for the rollout;</li><li>the baro learning on the takeoff run-up (`BAROLRN`, `BTLN` log);</li><li>the touchdown offset learning on each landing (`TDLRN`, `TDLN` log);</li><li>the new parameters `SIDEGAP`, `TD_OFS`, `DSC_ARC`, `RO_GAIN`, `BAROLRN`, `TDLRN`.</li></ul> |
-| `ArduPlane/mode_takeoff.cpp` | Pre-takeoff checks; integrator reset; one takeoff per arming; climb-out line hold; runway-circle loiter; starts the baro learning. |
-| `libraries/AP_Baro/AP_Baro.cpp`, `AP_Baro.h` | Thrust compensation (`BARO1_THST_SCALE`) on a plane without VTOL motors uses the forward throttle output, 0 to 1 after the throttle slew, reverse ignored, nothing while disarmed. AP_Baro reads it from `SRV_Channels`, as AP_Airspeed and the battery monitor already do, so no vehicle code has to feed it. An accessor lets ArduPlane update the parameter. |
-| `libraries/AP_HAL_ChibiOS/hwdef/FlyingRCF4WingMini/hwdef.dat`, `libraries/AP_HAL_SITL/hwdef/sitl/hwdef.dat`, `ama-field/ci/field-mode.hwdef` | Turn on `AP_BARO_THST_COMP_ENABLED` and `HAL_BARO_WIND_COMP_ENABLED` (wind compensation is off in `minimize_common.inc`). |
+| `ArduPlane/mode_autoland.cpp`, `mode.h` | The main part. It holds:<ul><li>the pits reference;</li><li>roll start and runway direction capture, including the veer fallback;</li><li>the runway circle;</li><li>circuit side, height selection and base circle sizing;</li><li>the level circuit, the even circle descent (`circle_descent_height()`) and the glide path by distance;</li><li>touchdown aim offset (`TD_OFS`);</li><li>touchdown detection for the rollout;</li><li>the touchdown report on each landing (`TDLN` log);</li><li>the new parameters `SIDEGAP`, `TD_OFS`, `DSC_ARC`, `RO_GAIN`, `FNL_HGT`.</li></ul> |
+| `libraries/AP_L1_Control/AP_L1_Control.*` | `set_period_scale()`: a multiplier (0.3–1) on `NAVL1_PERIOD` for straight-line tracking only; loiters are unchanged. AUTOLAND sets 0.6 on the final until the flare (`AUTOLAND_FINAL_L1_SCALE`) and 1 everywhere else and on leaving the mode. The base circle ends `AUTOLAND_SIDEGAP` (5 m) off the line; at the full period the test aircraft took 50–70 m of an 85–98 m final to come within 1 m of it (logs 19 and 23). In SITL the change keeps the final within about 1.6 m of the line instead of 2–3 m, on it from 15–50 m out. |
+| `ArduPlane/takeoff.cpp`, `Plane.h` | `takeoff_airborne_check()`: 1.5 m above the baro height at the start of the takeoff and 5 m/s over the ground, `highest_airspeed` is raised to `TKOFF_ROTATE_SPD` / `TKOFF_TDRAG_SPD1`, so the tail hold (which otherwise cycles with its pitch check), the ground pitch and the takeoff roll limit end as they would at those speeds. Without an airspeed sensor the EKF's synthetic estimate read 4.5–7 m/s up to 39 m on the test aircraft's headwind takeoff (log 23). |
+| `ArduPlane/mode_takeoff.cpp` | Pre-takeoff checks; integrator reset; one takeoff per arming; climb-out line hold; runway-circle loiter. |
 | `ArduPlane/mode_rtl.cpp` | RTL to the runway circle. |
 | `ArduPlane/fence.cpp` | Bounce-back to CRUISE, FBWB or FBWA. |
 | `ArduPlane/Attitude.cpp` | Flare de-crab, and rollout steering gain. |
@@ -367,35 +309,55 @@ test.
 | `libraries/AP_RangeFinder/AP_RangeFinder_TOFSenseF_I2C.*` | Reports signal strength as `signal_quality_pct` (strength / 255) and logs `RFSS`. Polls at 50 Hz, the MT-06's output rate. |
 | `libraries/AP_RangeFinder/AP_RangeFinder_Benewake_TFMiniPlus.*` | Reports `signal_quality_pct` from the strength (provisional mapping from the TF-Luna manual's repeatability table: 0 below 100 or from 32768, 100 × log10(strength / 100) otherwise), averages only valid samples, and logs `RFSS`. |
 | `libraries/AP_RangeFinder/AP_RangeFinder_Backend.*` | `log_raw_sample()`: the shared `RFSS` log. |
-| `libraries/SITL/*`, `libraries/AP_Baro/AP_Baro_SITL.cpp`, `libraries/AP_RangeFinder/AP_RangeFinder_SITL.cpp` | Test only: `SIM_BARO_THST` (baro error proportional to the throttle output), and for the SITL rangefinder `SIM_SONAR_STRONG` (signal quality), `SIM_SONAR_GARB`, `SIM_SONAR_HZ`, `SIM_SONAR_DROP`, `SIM_SONAR_FAIL`, and `SIM_SONAR_GLITCH` spikes. |
+| `libraries/SITL/*`, `libraries/AP_RangeFinder/AP_RangeFinder_SITL.cpp` | Test only: for the SITL rangefinder `SIM_SONAR_STRONG` (signal quality), `SIM_SONAR_GARB`, `SIM_SONAR_HZ`, `SIM_SONAR_DROP`, `SIM_SONAR_FAIL`, and `SIM_SONAR_GLITCH` spikes. |
 | `libraries/AP_HAL_ChibiOS/hwdef/FlyingRCF4WingMini/`, `Tools/bootloaders/FlyingRCF4WingMini_bl.*`, `Tools/AP_Bootloader/board_types.txt` | FlyingRC F4Wing Mini board (board ID 1241). |
 
 Nothing changes unless `AUTOLAND_OPTIONS` has bits 1 and 2 set (value 6). Without
 them the firmware behaves like stock ArduPlane 4.7.2, apart from the rangefinder
-gate and in-range rule, the baro thrust compensation on a fixed-wing motor (only
-with `BARO1_THST_SCALE` set), and the board-specific items.
+gate and in-range rule, and the board-specific items.
 
-**`AUTOLAND_TDLRN`** (index 11, every build) measures the touchdown of each AUTOLAND
-aimed at the roll start. After the flare starts, the touchdown is the rangefinder at
-its ground clearance; without one, it is where the EKF (GPS-aided) sink rate falls
-below 0.3 m/s and stays there for 1.5 s, at the first accelerometer spike (0.25 g
-above 1 g) in that time if any. The accelerometer alone is not enough: in SITL the
-flare pull-up reaches 0.8 g above 1 g, more than a soft touchdown, but the sink
-continues after it. A bounce (EKF climb rate above 0.7 m/s, or the rangefinder 0.3 m
-up) waits for the next contact; 2 s down confirms. Elevator input (over 10 %), the
-throttle stick above 60 % with `THROTTLE_NUDGE` on (the stick only acts above half
-way, as a nudge, so 0–60 % is ignored), a mode change, or
-more than 15 m off the runway line rejects the landing. The float (aim point to
-touchdown) moves `AUTOLAND_TD_OFS` half way toward it (as is from 0; 0–50 m) with
-`set_and_notify`, and it is saved at disarm. It doesn't touch the landing in
-progress: the aim point is fixed when AUTOLAND starts. The bounce check uses the EKF
-climb rate rather than the baro, because the uncompensated part of the baro airspeed
-error decays as the aircraft slows and would look like a climb.
-`AUTOLAND_TD_OFS` defaults to `AUTOLAND_TD_OFS_DEFAULT` in `mode_autoland.cpp`: 20 m
-with both baro compensations, 30 m without, from the test aircraft's measured float
-(36–48 m uncompensated in logs 15–18, 25–28 m compensated in SITL), so an untrained
-aircraft lands near the roll start instead of far down the runway.
-`AUTOLAND_BAROLRN` (index 10) exists only with thrust compensation.
+**The circle descent** (`AUTOLAND_DSC_ARC` with `AUTOLAND_FNL_HGT`, in
+`circle_descent_height()` and the LOITER exit in `navigate()`):
+
+- The plan is by degrees of turn still to go: circuit height down to
+  `AUTOLAND_FNL_HGT` at 60°, linear in angle from the start point, then level.
+- Outside the LAND flight stage TECS lags its height demand by `TECS_HDEM_TCONST`,
+  and on entering LAND it drops that lag ([AP_TECS.cpp](../../libraries/AP_TECS/AP_TECS.cpp),
+  `_update_height_demand`). v15–v17 fed the arc plan straight in, so the aircraft
+  trailed it by sink rate × 3 s, and the target stepped that far below it at the
+  start of the final: 4.6–6.7 m in the logs and SITL, then a dive at up to 4.7 m/s.
+  The plan is now read ahead by ground speed × `TECS_HDEM_TCONST` along the circle,
+  so the lagged demand follows the plan itself.
+- The descent starts when the aircraft itself (not the read-ahead target) reaches
+  `AUTOLAND_DSC_ARC`, so 180 works on a half-turn arrival from downwind. At that
+  moment the read-ahead target is already part way down; the 3 s lag turns that
+  step into the same even sink from the start point. It starts from the height the
+  aircraft is at, and reports a planned sink above 2.5 m/s.
+- It starts only with the aircraft within 15 m (or a quarter radius) of the circle
+  and turning its way: joining it is often an S-turn, during which the degrees to go
+  mean nothing. Established past the start point, it starts there if 60% of the
+  descent arc is left; otherwise one more lap. It never climbs back (the circle part
+  of the target is latched), and an extra lap holds that height until clear of the
+  exit.
+- At the exit, more than 2.5 m above `AUTOLAND_FNL_HGT` flies another lap (at most
+  two). The final glides from `AUTOLAND_FNL_HGT` at the exit point (usually a little
+  before `land_start`) to the aim; `land_start`'s height is put on that line, so the
+  stock approach-stage slope continues it.
+- `AUTOLAND_FNL_HGT` 0 keeps the old continuous glide.
+
+**The touchdown report** measures the touchdown of each AUTOLAND aimed at the roll
+start, and suggests the `AUTOLAND_TD_OFS` that would have put it on the roll start
+(the current value plus the distance past it). After the flare starts, the touchdown is the rangefinder tiers of
+`touchdown_update()`; without a rangefinder, it is where the EKF (GPS-aided) sink rate
+falls below 0.3 m/s and stays there for 1.5 s, at the first accelerometer spike
+(0.25 g above 1 g) in that time if any. A bounce (EKF climb rate above 0.7 m/s, or the
+rangefinder losing the ground) waits for the next contact; 2 s down confirms. It is
+reported and logged (`TDLN`, with `PIn` for elevator or throttle-stick input), and
+nothing is changed: v17's `AUTOLAND_TDLRN` (index 11) moved `AUTOLAND_TD_OFS` half
+way to each measured float, and on the crash flights it followed the baro error from
+20 to 0. Index 10 (v17's `AUTOLAND_BAROLRN`) and 11 are left unused.
+`AUTOLAND_TD_OFS` defaults to 25 m (`AUTOLAND_TD_OFS_DEFAULT`), what v16 landed with
+on the vented test aircraft.
 
 ### Commits on top of `Plane-4.7.2`
 
@@ -406,18 +368,15 @@ aircraft lands near the roll start instead of far down the runway.
 5. `ArduPlane: runway-circuit AUTOLAND, TAKEOFF and fence behaviour`
 6. `AMA field mode: documentation, diagrams, example parameters and scripts`
 
-v17 adds:
+v17 added the baro compensation and learning, the touchdown learning and the
+rangefinder handling; v18 removes the first two again and keeps the rest:
 
-7. `AP_Baro: thrust compensation from the forward motor on a fixed-wing`, with the
-   hwdef changes
-8. `ArduPlane: learn BARO1_THST_SCALE on the takeoff run-up`
-9. `ArduPlane: learn AUTOLAND_TD_OFS from each AUTOLAND touchdown`
-10. `ArduPlane: sensor-agnostic rangefinder engagement and touchdown on AUTOLAND`, with the 50 Hz
-    TOFSense-F polling
-11. `CI: baro compensation on every board, before the trim tiers`
-12. `AMA field: baro compensation docs, parameters and scripts`
+7. `ArduPlane: sensor-agnostic rangefinder engagement and touchdown on AUTOLAND`, with the 50 Hz
+   TOFSense-F polling
+8. `ArduPlane: report the AUTOLAND touchdown point`
+9. `ArduPlane: even circle descent and gentle final on AUTOLAND`
 
-Commits 3–5 and 7–10 are what another board needs; 1–2 are the test aircraft's board. To move
+Commits 3–5 and 7–9 are what another board needs; 1–2 are the test aircraft's board. To move
 to a newer ArduPilot release, branch from the new tag and cherry-pick the commits.
 The ArduPlane changes are concentrated in `mode_autoland.cpp`, so conflicts should
 stay local.
@@ -444,7 +403,8 @@ example aircraft:
 | v14 | Flare de-crab (nose aligned with the runway). |
 | v15 | `AUTOLAND_DSC_ARC`. |
 | v16 | Integrator reset on TAKEOFF; `AUTOLAND_RO_GAIN`; one takeoff per arming. |
-| v17 (SITL-tested, not yet flown) | Baro thrust compensation from the forward motor, with wind compensation, on every board; `AUTOLAND_BAROLRN` learns `BARO1_THST_SCALE` on each takeoff run-up; `AUTOLAND_TDLRN` learns `AUTOLAND_TD_OFS` from each AUTOLAND touchdown; rangefinder handling for any sensor on the AUTOLAND final (engagement by consistency with the descent at any sample rate, correction held below the minimum range, tiered touchdown detection including a blind zone, wheel-height reference); signal quality and `RFSS` for Benewake I2C (TF-Luna, if type 25 detects it); TOFSense-F polled at 50 Hz. First release built by CI, for every board in `boards.txt`. |
+| v17 (flown; crashed on the third landing) | Baro thrust compensation from the forward motor, with wind compensation, on every board; `AUTOLAND_BAROLRN` learns `BARO1_THST_SCALE` on each takeoff run-up; `AUTOLAND_TDLRN` learns `AUTOLAND_TD_OFS` from each AUTOLAND touchdown; rangefinder handling for any sensor on the AUTOLAND final (engagement by consistency with the descent at any sample rate, correction held below the minimum range, tiered touchdown detection including a blind zone, wheel-height reference); signal quality and `RFSS` for Benewake I2C (TF-Luna, if type 25 detects it); TOFSense-F polled at 50 Hz. First release built by CI, for every board in `boards.txt`. |
+| v18 (SITL-tested, not yet flown) | Removes v17's baro compensation and its learning (the vented fuselage needs none; on the unvented test aircraft the compensation read 3–4 m high on the approach and the third landing flew into the ground). The touchdown point is reported, no longer learned; `AUTOLAND_TD_OFS` default 25 m. Even circle descent from `AUTOLAND_DSC_ARC` to `AUTOLAND_FNL_HGT` (new, 8 m) with TECS lag compensation, level for the last 60°, another lap if high, and a gentle final from the circle exit: no step or dive at the start of the final (SITL: peak sink below 10 m 2.0–3.0 m/s, against 4.65). Final tracks the runway line with 0.6 × `NAVL1_PERIOD` (on the centreline sooner). TAKEOFF confirms the pits side (*"Takeoff: pits 57m left, circle on right"*). Tail hold, ground pitch and takeoff roll limit released 1.5 m up, not only at the estimated airspeed (SITL, thresholds out of reach: released 0.2 s after liftoff; stock held the ground pitch to 22 m). Keeps v17's rangefinder handling and TF-Luna support. FlyingRC F4Wing Mini: 878,784 bytes used, 104,256 free. |
 
 v9 was a ground throttle mapping for spring-centred throttle sticks, and was not
 kept.

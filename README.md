@@ -19,9 +19,10 @@ The goal is a setup that a new pilot can fly safely:
 - **FBWB** Once ready, the pilot flips into FBWB as the everyday flying mode. It holds altitude and won't go below a floor
   height. If it hits the fence it turns back toward the field and hands control
   back to the pilot.
-- **AUTOLAND** on one switch. It flies a level circuit on the far side, descends
-  only once it's turning onto final, and kicks out the crab in the flare. It touches
-  down where the takeoff roll started, then holds the runway heading until it stops.
+- **AUTOLAND** on one switch. It flies a level circuit on the far side, comes down
+  the base circle at one even sink rate, levels off before the final, glides gently
+  down the final and kicks out the crab in the flare. It touches down near where the
+  takeoff roll started, then holds the runway heading until it stops.
 
 The inherent behaviour is built into ArduPlane, this custom version essentially controls where the plane is allowed to fly, so it works on **any board and any airframe
 that takes off from a runway**. That means a conventional plane with a rudder, GPS
@@ -36,8 +37,8 @@ aircraft, a Freewing Pandora. Its settings are included only as a
 **Minimum hardware**
 
 - **An ArduPilot flight controller that runs ArduPlane 4.7**, with its barometer. See list of boards and compiled builds on the Releases tab.
-  Every ArduPilot board has one; the field mode corrects it for prop wash and
-  airspeed.
+  Every ArduPilot board has one. If the fuselage is pressurised by the prop wash,
+  vent it (see [Limitations](#10-limitations-and-safety-notes)).
 - **GPS**: for the pits reference, the roll start (landing point) and the runway
   direction.
 - **Compass**: required. ArduPlane can fly without one, but the field mode can't.
@@ -78,9 +79,7 @@ switch.
 
 Some 1 MB boards don't fit the full firmware, so they ship a **trimmed** build with
 less-used features removed, such as QuadPlane, soaring and camera/gimbal support.
-The release notes list exactly what each trimmed board is missing. A board that
-only fits without baro compensation is marked "Baro comp: no"; its landings rely on
-the learned `AUTOLAND_TD_OFS`. See [TUNING.md](ama-field/docs/TUNING.md#44-boards-without-baro-compensation).
+The release notes list exactly what each trimmed board is missing.
 
 ---
 
@@ -176,15 +175,14 @@ take off with TAKEOFF.
   both directions come from it.
 - Climb-out **tracks the runway line** itself, not just a point ahead. A crosswind
   can't drift the climb over the pits.
-
-**Baro learning on the run-up.** The first second or two of the roll is a free
-static run-up: the throttle comes up while the aircraft still stands still. With
-`AUTOLAND_BAROLRN` 1 (the default), the firmware measures how far the baro reading
-moves as the throttle rises. It updates `BARO1_THST_SCALE` straight away, so the
-rest of the roll and the climb use corrected altitude, and saves it at disarm. You
-see *"Baro: throttle scale 47 Pa (measured 44, was 50)"*. If the aircraft rolls
-almost at once, nothing is learned: *"Baro: run-up too short, not learned"*. See
-[TUNING.md](ama-field/docs/TUNING.md#4-barometer-compensation).
+- **Tail hold and rotation release once airborne.** Stock ArduPlane holds the tail
+  down (`TKOFF_TDRAG_ELEV`), keeps the ground pitch and limits the bank until the
+  airspeed reaches `TKOFF_TDRAG_SPD1` / `TKOFF_ROTATE_SPD`. Without an airspeed
+  sensor that is an estimate, which can read far too low on the climb-out (on the
+  test aircraft into a strong headwind, 4.5–7 m/s up to 39 m, with the tail hold
+  cycling on and off against the pitch). Here, 1.5 m above the start of the takeoff
+  at 5 m/s or more over the ground, those speeds count as reached: *"Takeoff:
+  airborne, tail hold released"*.
 
 **The runway circle**
 - At `TKOFF_ALT` the aircraft loiters on a circle **abeam the roll start, on the
@@ -210,18 +208,36 @@ almost at once, nothing is learned: *"Baro: run-up too short, not learned"*. See
    touchdown aim, `AUTOLAND_SIDEGAP` from the extended centreline. The radius is
    sized for speed and wind, up to 60 m, so the turn onto final ends lined up rather
    than overshooting across the centreline toward the pits.
-3. **Descent starts on the final turn.** It begins `AUTOLAND_DSC_ARC` degrees before
-   the aircraft is lined up (90° = the last quarter of the turn). Set it to 0 to stay
-   level until lined up.
-4. **Final** follows a glide path by distance. This replaces the stock behaviour of
-   diving at `TECS_SINK_MAX` straight after the turn.
+3. **Even descent on the base circle.** The aircraft starts descending
+   `AUTOLAND_DSC_ARC` degrees before it is lined up and comes down at one even sink
+   rate to `AUTOLAND_FNL_HGT`, reached 60° before lined up. The last 60° of the turn
+   are flown level, so the aircraft is settled before the final starts.
+   - Arriving from downwind, the turn onto final is about 180°, so 180 starts the
+     descent as that turn begins (about 1.8 m/s from 21 m to 8 m on the example
+     aircraft).
+   - The descent only starts once the aircraft is established on the circle. If that
+     is past the start point (a value bigger than the arrival turn, such as 240), it
+     starts there, as long as at least 60% of the descent is still ahead.
+   - Too small a value leaves too little turn for the height to lose: below about
+     150 on a 20 m circuit you see *"Autoland: descent N m/s, raise AUTOLAND_DSC_ARC"*.
+   - If it reaches the end of the turn more than 2.5 m high it flies one more lap,
+     coming down to `AUTOLAND_FNL_HGT` on it, rather than dive.
+   - Set `AUTOLAND_DSC_ARC` to 0 to stay level until lined up.
+4. **Gentle final.** A straight glide from `AUTOLAND_FNL_HGT` at the circle exit to
+   the touchdown aim (8 m over 85 m is about 5.4°, 1.5 m/s at 16 m/s). At that sink
+   rate the flare has little to do. The base circle ends `AUTOLAND_SIDEGAP` to the
+   far side of the runway line, so the turn can't overshoot toward the pits; on the
+   final the line is tracked with 0.6 × `NAVL1_PERIOD`, so the aircraft is on the
+   centreline early in the final instead of converging over most of it. This
+   replaces both the stock behaviour (diving
+   at `TECS_SINK_MAX` straight after the turn) and v16/v17's, where the aircraft
+   started the final about 5 m above its glide path and dived to catch it.
 5. **Flare.** The rudder points the nose down the runway, removing the crosswind
    crab, instead of steering the ground track. The touchdown aim is
-   `AUTOLAND_TD_OFS` short of the roll start. Stock ArduPilot already aims the glide
-   path short of that by the flare distance, so the flare ends there. The float
-   after the flare carries the aircraft on, and `AUTOLAND_TDLRN` measures it on
-   every landing and sets `AUTOLAND_TD_OFS` to it, so the touchdown moves onto the
-   roll start.
+   `AUTOLAND_TD_OFS` short of the roll start; the float after the flare carries the
+   aircraft on toward it. Every landing reports where it touched down
+   (*"Autoland: touchdown +4m from roll start"*), so you can adjust
+   `AUTOLAND_TD_OFS` by hand.
 6. **Rollout.** Steering is multiplied by `AUTOLAND_RO_GAIN` from touchdown until the
    aircraft stops, so it holds the runway heading as the rudder loses authority.
 
@@ -229,8 +245,11 @@ almost at once, nothing is learned: *"Baro: run-up too short, not learned"*. See
 
 The height profile is the key safety behaviour. Stock AUTOLAND starts descending as
 soon as it is selected, so it can arrive low over trees on the downwind leg. Here
-the circuit stays at or above `AUTOLAND_WP_ALT` until the aircraft is turning onto
-final, which is the only time it is over the cleared approach.
+the circuit stays at or above `AUTOLAND_WP_ALT` until the descent start on the base
+circle. From there the aircraft comes down over the base circle, behind the
+touchdown aim on the far side, to `AUTOLAND_FNL_HGT`: that area and the approach
+must be clear of obstacles down to that height. A smaller `AUTOLAND_DSC_ARC` keeps
+it higher for longer over the circle, at the cost of a faster sink.
 
 ---
 
@@ -311,9 +330,8 @@ aircraft at ~14 m/s; more for faster aircraft).
    - TAKEOFF and FBWB on the mode switch;
    - AUTOLAND on its own switch (`RCx_OPTION` 183);
    - MANUAL or FBWA on another switch as the pilot's way out.
-5. **Tune in order**: takeoff (the first auto takeoff also measures the baro
-   throttle error), baro airspeed compensation, circuit, flare and touchdown, then
-   rollout. Follow the [quick start](#quick-start) below,
+5. **Tune in order**: takeoff, circuit, descent and final, flare and touchdown point,
+   then rollout. Follow the [quick start](#quick-start) below,
    with [TUNING.md](ama-field/docs/TUNING.md) for how to choose starting values for
    your airframe and what to change for each symptom.
 
@@ -327,7 +345,7 @@ field settings are listed; everything else is stock ArduPlane.
 - Load [`ama_field_core.param`](ama-field/params/ama_field_core.param). It sets
   `AUTOLAND_OPTIONS` 6 (land at the roll start, circuit away from the pits), the
   fence bounce-back (`FENCE_ACTION` 6, `FENCE_RET_RALLY` 0), RTL to the runway circle
-  (`RTL_AUTOLAND` 0, no rally points) and the baro compensation.
+  (`RTL_AUTOLAND` 0, no rally points) and the circle descent and gentle final.
 - Put AUTOLAND on a switch (`RCx_OPTION` 183) and TAKEOFF and FBWB on the mode
   switch.
 
@@ -338,34 +356,30 @@ field settings are listed; everything else is stock ArduPlane.
 | `AUTOLAND_WP_ALT` | Tallest obstacle near the circuit + 5 m. The circuit never goes lower before the final. | 20 m |
 | `AUTOLAND_WP_DIST` | Final length, about 6–8 s at landing speed. | 80–120 m |
 | `AUTOLAND_SIDEGAP` | Gap between the centreline and the base circle. | 5–15 m |
-| `AUTOLAND_DSC_ARC` | Degrees of the final turn the descent starts on. | 90 |
+| `AUTOLAND_DSC_ARC` | Degrees before lined up where the descent starts. 180 = as the turn from downwind begins. Smaller = later and steeper; the base circle must be clear down to `AUTOLAND_FNL_HGT`. | 150–180 |
+| `AUTOLAND_FNL_HGT` | Height at the start of the final. Lower = a gentler final but lower over the ground before the aim point. | 8 m |
 | `CRUISE_ALT_FLOOR` | FBWB/CRUISE floor, usually = `AUTOLAND_WP_ALT`. | 20 m |
-| `FENCE_RADIUS`, `FENCE_ALT_MAX` | Big enough for `AUTOLAND_WP_DIST` + `AUTOLAND_TD_OFS` (up to 50 m) + base circle radius behind the roll start, and `AUTOLAND_SIDEGAP` + 2 × radius to the side, plus the fence overshoot. | 240–300 m |
+| `FENCE_RADIUS`, `FENCE_ALT_MAX` | Big enough for `AUTOLAND_WP_DIST` + `AUTOLAND_TD_OFS` + base circle radius behind the roll start, and `AUTOLAND_SIDEGAP` + 2 × radius to the side, plus the fence overshoot. | 240–300 m |
 
 The base circle radius is sized automatically from speed, wind and `ROLL_LIMIT_DEG`
 ([TUNING.md 2.3](ama-field/docs/TUNING.md#23-checking-the-circuit-fits-the-fence)).
 
-**3. Leave the learned values at their defaults**
+**3. The touchdown point**
 
-| Parameter | Default | Learned from |
-|---|---|---|
-| `BARO1_THST_SCALE` | 0 | Every auto takeoff run-up (`AUTOLAND_BAROLRN` 1) |
-| `AUTOLAND_TD_OFS` | 20 m (30 m on a board without baro compensation) | Every AUTOLAND touchdown you don't touch (`AUTOLAND_TDLRN` 1) |
-| `BARO1_WCF_ENABLE` / `BARO1_WCF_FWD` | 1 / 0 | Set `BARO1_WCF_FWD` from `baro_throttle.py` after the first landings (step 6) |
-
-The airspeed baro compensation needs EKF3 (`AHRS_EKF_TYPE` 3, the default). On a
-board with two barometers keep `BARO_PRIMARY` 0: the thrust compensation applies to
-BARO1.
+`AUTOLAND_TD_OFS` (default 25 m) aims the landing that far short of the roll start
+to allow for the float after the flare. Each landing reports where it touched down
+and suggests a value; set it by hand from those reports (step 6). Nothing changes it
+automatically.
 
 **4. Airframe settings the field mode relies on**
 
 | Parameter | Set to | Why |
 |---|---|---|
-| `TKOFF_THR_SLEW` | 20–30 %/s | Gives the stationary run-up that measures `BARO1_THST_SCALE`. |
+| `TECS_PITCH_MIN` | -12 | Limits the nose-down pitch in the automatic modes, so no part of the approach can turn into a dive (about 3.3 m/s at 16 m/s). |
 | `STEER2SRV_I` | 0 | Stops the integrator winding up while taxiing. |
 | `TKOFF_TDRAG_ELEV` / `_SPD1` | Taildragger: 30–60 / just below `TKOFF_ROTATE_SPD`. Tricycle: 0 or negative. | Holds the steering wheel on the ground for the roll. |
 | `AUTOLAND_RO_GAIN` | 1, raised 0.5–1 at a time | Rollout steering as the rudder loses authority. |
-| `LAND_FLARE_SEC` / `_ALT`, `TECS_LAND_SINK`, `LAND_PITCH_DEG` | Core file values, then per airframe | The flare. The touchdown point is learned around it. |
+| `LAND_FLARE_SEC` / `_ALT`, `TECS_LAND_SINK`, `LAND_PITCH_DEG` | Core file values, then per airframe | The flare. Re-check `AUTOLAND_TD_OFS` after changing it. |
 | `RNGFND_LANDING` | 1 with a downward rangefinder, else 0 | Optional, any sensor. Set `RNGFND1_MIN`, `_MAX` and `_GNDCLR` (measured on the wheels) correctly: the field mode uses them to decide engagement and touchdown. |
 
 **5. Fly it**
@@ -375,26 +389,23 @@ BARO1.
 - **Line up, stop at idle, select TAKEOFF.** Point the aircraft exactly straight
   down the runway by hand: the direction it points becomes the takeoff and landing
   direction, and any angle to the runway lands it across the runway by the same
-  angle. The roll start becomes the landing point, and the run-up measures the baro
-  (*"Baro: throttle scale ..."*). One ground takeoff per arming.
+  angle. The roll start becomes the landing point. One ground takeoff per arming.
 - **Fly FBWB.** The fence turns the aircraft back and resumes the mode.
-- **Flip AUTOLAND** at any height. It flies a level circuit on the far side, descends
-  on the final turn and lands at the roll start (*"Autoland: touchdown ...,
-  TD_OFS ..."*).
-- **Leave the elevator alone, and the throttle stick below 60 %**, from the final
-  until a few seconds after touchdown if you want the landing learned. The throttle
-  stick doesn't need centring: in AUTOLAND it does nothing below half way (stock
-  ArduPlane throttle nudge), so idle is the natural place for it, and 0–60 % is
-  ignored by the learning. Above half it adds throttle and lengthens the landing.
-  Aileron and rudder corrections are fine. Elevator input, the throttle stick above
-  60 %, or a mode change just skips the learning for that landing.
+- **Flip AUTOLAND** at any height. It flies a level circuit on the far side, comes
+  down the base circle, glides down the final and lands near the roll start
+  (*"Autoland: touchdown +4m from roll start"*).
+- **The throttle stick doesn't need centring.** In AUTOLAND it does nothing below
+  half way (stock ArduPlane throttle nudge), so idle is the natural place for it.
+  Above half it adds throttle and lengthens the landing.
 
 **6. After the first landings**
 
-- Run `ama-field/log-analysis/baro_throttle.py` on the logs and set `BARO1_WCF_FWD`
-  to the suggested value ([TUNING.md 4.2](ama-field/docs/TUNING.md#42-airspeed-part-baro1_wcf_fwd)).
-- `BARO1_THST_SCALE` and `AUTOLAND_TD_OFS` settle by themselves over 3–4 flights.
-  After a flare change, `AUTOLAND_TD_OFS` follows over the next landings.
+- **Set the touchdown point.** After each landing you see *"Autoland: touchdown +4m
+  from roll start"* and *"Autoland: suggest AUTOLAND_TD_OFS 29 (now 25)"*: the value that
+  would have put that landing on the roll start (the current value plus the reported
+  distance). Average the suggestions from a few landings and set that. Leave out
+  landings with elevator or throttle input: those change where it touches down (the
+  log's TDLN.PIn shows which landings had them).
 - Symptom-by-symptom tuning of the circuit, flare and rollout is in
   [TUNING.md](ama-field/docs/TUNING.md); the
   [Pandora example](#example-aircraft) shows one finished setup.
@@ -408,24 +419,10 @@ BARO1.
 | Parameter | Default | Range | Typical | What it does |
 |---|---|---|---|---|
 | `AUTOLAND_SIDEGAP` | 0 | 0–100 m | 5–15 | Gap between the extended centreline and the near edge of the base circle. The runway circle uses this + 10 m. |
-| `AUTOLAND_DSC_ARC` | 0 | 0–270° | 0–90 | Degrees before the end of the final turn at which the descent starts. 0 = level until lined up. |
+| `AUTOLAND_DSC_ARC` | 0 | 0–270° | 150–180 | Degrees before lined up at which the aircraft starts the circle descent (at least 90 with `AUTOLAND_FNL_HGT` set). 180 = as the turn from downwind begins. 0 = level until lined up. |
+| `AUTOLAND_FNL_HGT` | 8 m | 0–50 m | 6–10 | Height at the start of the final, reached 60° before the end of the turn and held level to the final. 0 = one continuous glide from the descent start (v16/v17 behaviour). |
 | `AUTOLAND_RO_GAIN` | 1.0 | 1–5 | 1–3 | Steering multiplier from touchdown until stopped. |
-| `AUTOLAND_BAROLRN` | 1 | 0–1 | 1 | Learn `BARO1_THST_SCALE` on each auto takeoff's run-up, apply it straight away and save it at disarm. 0 = off. |
-| `AUTOLAND_TD_OFS` | 20 (30 without baro comp) | -50–100 m | 10–40 | Aims the landing this far short of the roll start to absorb the float after the flare. The default is a typical float, so an untrained aircraft lands near the roll start. Learned by `AUTOLAND_TDLRN`. |
-| `AUTOLAND_TDLRN` | 1 | 0–1 | 1 | Measure where each AUTOLAND touches down and move `AUTOLAND_TD_OFS` half way toward the float it measured (0–50 m), used from the next landing and saved at disarm. Not learned after elevator input, the throttle stick above 60 %, or a mode change; aileron and rudder corrections are allowed. 0 = off. |
-
-### Baro compensation
-
-These are stock ArduPilot parameters, enabled in every build of this firmware
-unless a board only fits without them. In this firmware thrust compensation also
-works on a fixed-wing forward motor: stock ArduPilot only uses it with VTOL
-motors.
-
-| Parameter | Default | Typical | What it does |
-|---|---|---|---|
-| `BARO1_THST_SCALE` | 0 | 30–60 Pa | Pressure error at full throttle, from the prop wash pressurising the fuselage. Learned on takeoff by `AUTOLAND_BAROLRN`. |
-| `BARO1_WCF_ENABLE` | 0 | 1 | Turns on the airspeed part. |
-| `BARO1_WCF_FWD` | 0 | 0–0.3 | Pressure error as a fraction of the dynamic pressure, in forward flight. Set from a landing log with `baro_throttle.py`. |
+| `AUTOLAND_TD_OFS` | 25 | -50–100 m | 10–40 | Aims the landing this far short of the roll start to absorb the float after the flare. The default is a typical float. Set it by hand from the touchdown reports. |
 
 ### Existing parameters with a new meaning when `AUTOLAND_OPTIONS` = 6
 
@@ -445,7 +442,7 @@ motors.
 | `CRUISE_ALT_FLOOR` | field | FBWB and CRUISE won't descend below it. |
 | `TKOFF_ALT` | field | Height of the runway circle after takeoff. |
 | `TKOFF_TDRAG_ELEV` / `_SPD1`, `TKOFF_ROTATE_SPD`, `TKOFF_GND_PITCH` | airframe | Takeoff roll. |
-| `TKOFF_THR_SLEW` | 20–30 | A gentle throttle ramp gives the stationary run-up that `AUTOLAND_BAROLRN` measures. |
+| `TECS_PITCH_MIN` | -12 | Limits nose-down pitch in the automatic modes: a backstop against any dive on the approach. |
 | `STEER2SRV_P` / `_I` / `_MINSPD` | airframe | Ground steering on roll, flare and rollout. `_I` 0 recommended. |
 | `NAVL1_PERIOD` | airframe | Lower values track the circle and final more tightly. Too high and loiters fly wide. |
 | `LAND_FLARE_SEC` / `_ALT`, `LAND_PITCH_DEG`, `TECS_LAND_SINK`, `TECS_LAND_ARSPD` | airframe | Flare and touchdown. |
@@ -462,29 +459,28 @@ Every parameter, with how to choose its value, is covered in
 | Autoland: GPS fix point saved | Pits reference stored. Arming is now allowed. |
 | PreArm: Autoland: no GPS fix point yet | Waiting for the first good GPS fix. |
 | Takeoff blocked: no compass heading | TAKEOFF refused: the compass is not healthy. |
+| Takeoff: pits Nm left, circle on right | TAKEOFF accepted on the ground: the pits reference is N m to that side of the lined-up runway line, and the runway circle and circuit will be on the other side. Check it matches the field before the roll. |
 | Takeoff blocked: pits side unknown | TAKEOFF refused: it was powered up on the runway line, or the GPS fix is too close to it. Power cycle in the pits. |
 | Takeoff blocked: disarm and re-arm first | TAKEOFF refused: this arming has already flown. |
 | Autoland direction= N | Runway direction captured. Check it matches the runway. |
 | Autoland: roll veered X, using line-up hdg N | The roll swerved more than 8°, so the lined-up compass heading is used. |
 | Autoland: no target, roll Nm | Roll too short or long. AUTOLAND is unavailable this flight. |
 | Autoland: target set Nm from home | Touchdown reference captured. |
+| Takeoff: airborne, tail hold released | 1.5 m up before the airspeed estimate reached `TKOFF_TDRAG_SPD1` / `TKOFF_ROTATE_SPD`: the tail hold ends and the climb-out starts. |
 | Takeoff: loiter abeam takeoff point | TAKEOFF moved to the runway circle. |
 | Fence: turned back, MODE resumed | Fence bounce-back complete. |
 | Autoland: circuit at Nm, descend on final | Circuit height chosen. |
 | Autoland: circuit on left/right side | Circuit side (away from the pits). |
 | Autoland: on circle, descending | It was selected above the height cap, and is now coming down on the base circle. |
 | Autoland: no takeoff point captured | AUTOLAND refused. |
-| Baro: throttle scale N Pa (measured M, was O) | The takeoff run-up measured the baro thrust error; `BARO1_THST_SCALE` is now N, saved at disarm. |
-| Baro: run-up too short, not learned | The aircraft rolled before the throttle had come up far enough. Nothing changed. |
-| Baro: run-up too noisy / out of range, not learned | The parked baro reading was unsteady (wind gusts, someone moving the aircraft), or the result was implausible. Nothing changed. |
-| Baro: no still baseline, not learned | TAKEOFF was selected without half a second standing still at idle first. Nothing changed. |
+| Autoland: Nm high on the final turn, another lap | It reached the end of the base turn more than 2.5 m above `AUTOLAND_FNL_HGT` (it joined the circle too late to descend, or couldn't come down fast enough): one more lap instead of a dive. At most two extra laps. |
 | Rangefinder engaged at Nm | The rangefinder is now used for the flare and touchdown. |
 | Rangefinder can't see ground on wheels: blind-zone touchdown | At arming: `RNGFND1_GNDCLR` is below `RNGFND1_MIN`, so touchdown is detected from the range ending at the bottom (information only). |
 | Rangefinder range below flare height: flare decided by baro | At arming: `RNGFND1_MAX` is less than `LAND_FLARE_ALT` + 1 m (information only). |
-| Autoland: touchdown +Nm from roll start, TD_OFS N (was O) | Where this landing touched down (+ past the roll start); `AUTOLAND_TD_OFS` for the next landing, saved at disarm. |
-| Autoland: elevator/throttle input / mode change, TD_OFS not learned | During the final, flare or first 2 s of the rollout you moved the elevator stick, raised the throttle stick above 60 %, or changed mode. Nothing changed. Aileron and rudder corrections, and the throttle stick anywhere from 0 to 60 %, don't stop the learning. |
-| Autoland: touchdown Nm off the runway line / +Nm from roll start, TD_OFS not learned | The touchdown was more than 15 m to the side, or implausibly far from the aim. Nothing changed. |
-| Autoland: touchdown not seen, TD_OFS not learned | It disarmed before a touchdown was confirmed. Nothing changed. |
+| Autoland: touchdown +Nm from roll start | Where this landing touched down, along the runway line: + past the roll start, − before it. |
+| Autoland: suggest AUTOLAND_TD_OFS N (now M) | The `AUTOLAND_TD_OFS` that would have put this landing on the roll start (M + the distance above). Average a few and set it; nothing is changed automatically. |
+| Autoland: descent N m/s, raise AUTOLAND_DSC_ARC | The descent arc is too short for the height to lose (more than 2.5 m/s planned). Usually followed by another lap. |
+| Autoland: touchdown not seen | It disarmed before a touchdown was confirmed. |
 
 ---
 
@@ -493,25 +489,25 @@ Every parameter, with how to choose its value, is covered in
 - **It only knows the field from this power-up and this takeoff.** Always power up in
   the pits and take off with TAKEOFF. If you hand-launch, or take off manually, there
   is no touchdown reference.
-- **The barometer reads low with throttle and airspeed.** Air coming in through the
-  cowling pressurises the whole fuselage. Most of it is prop wash; airspeed adds a
-  smaller part. On the test aircraft the baro read about 4 m low at full throttle
-  standing still, and about 2 m low at idle on the approach.
-  - Foam over the baro chip doesn't fix it, because the pressure is the same
-    throughout the fuselage.
-  - The fix is `BARO1_THST_SCALE` (learned on every auto takeoff) and
-    `BARO1_WCF_FWD`; see [TUNING.md](ama-field/docs/TUNING.md#4-barometer-compensation).
-    Thrust compensation works on fixed-wing aircraft in this firmware.
-  - Uncompensated, it is a small positive feedback loop in TECS: more throttle,
-    the baro reads lower, TECS thinks the aircraft is low and adds more throttle.
-    It also makes the takeoff heights happen higher than set, and the flare start
-    high and float.
+- **The barometer must read true height on the approach.** Every height in the
+  circuit, the final and the flare decision comes from it.
+  - On a closed foam fuselage the prop wash coming in through the cowling
+    pressurises the whole inside, so the baro reads low with throttle (about 4 m low
+    at full throttle on the test aircraft). Foam over the baro chip doesn't help: the
+    pressure is the same throughout the fuselage.
+  - **The fix is a vent**: a hole that lets the inside pressure equalise (on the
+    test aircraft, one cut in the fuselage). After it the landings were close to
+    perfect without any compensation.
+  - Software compensation was tried in v17 (`BARO1_THST_SCALE` learned on takeoff,
+    plus `BARO1_WCF_FWD`) and removed: on the test aircraft it made the baro read
+    3–4 m high on the idle approach, the aircraft landed progressively short, and
+    the third landing flew into the ground. Leave `BARO1_THST_SCALE` and
+    `BARO1_WCF_ENABLE` at 0.
 - **Rangefinders: range matters.**
   - **Outdoor range is less than rated.** `RNGFND1_MAX` is only the configured
     limit; the *usable* range outdoors, in sun over grass, is often much shorter.
     The MT-06 gives strong returns only below about 2.5–3 m, so it engages at about
-    2.5–3 m: enough to decide a flare at about 2 m on a shallow final
-    (`AUTOLAND_DSC_ARC` 90).
+    2.5–3 m: enough to decide a flare at 2–3 m on the gentle final.
   - **A longer-range sensor decides the flare on any final.** A sensor that really
     reaches 4 m or more outdoors (a TF-Luna, rated 8 m at 90% reflectivity and
     2.5 m at 10%, or a lidar or radar) does. Measure your sensor's real range on
@@ -535,8 +531,16 @@ Every parameter, with how to choose its value, is covered in
   the area you really need to protect.
 - **A breach during AUTOLAND abandons the landing.** Keep the circuit inside the
   fence: roughly `AUTOLAND_WP_DIST` + `AUTOLAND_TD_OFS` + circle radius behind
-  the roll start (the learning can raise `AUTOLAND_TD_OFS` to 50 m), and up to about
-  2 × radius + `AUTOLAND_SIDEGAP` to the side.
+  the roll start, and up to about 2 × radius + `AUTOLAND_SIDEGAP` to the side.
+- **The base circle and the approach must be clear down to `AUTOLAND_FNL_HGT`.**
+  The descent happens on the base circle, behind the touchdown aim on the far side.
+  On a gentle final the aircraft is also under 2 m for the last 15–20 m before the
+  aim point, which sits `AUTOLAND_TD_OFS` before the roll start: that ground must be
+  clear too.
+- **A gentler final floats less.** In SITL the gentle final touched down about 20 m
+  shorter than v16/v17's diving final with the same `AUTOLAND_TD_OFS`. Watch the
+  touchdown reports on the first landings and lower `AUTOLAND_TD_OFS` if it lands
+  short.
 - **LOITER mode** circles wherever it is selected, including over the pits. Only the
   automatic modes described here know about the pits side.
 - SITL can't model tailwheel steering. Ground handling was tuned from flight logs.
@@ -565,9 +569,11 @@ compare with the core file:
 | Parameter | Pandora (example) | Why on that aircraft |
 |---|---|---|
 | `AUTOLAND_WP_ALT` / `WP_DIST` | 20 / 85 | Trees beyond one end; a short final for a draggy foam aircraft. |
-| `BARO1_THST_SCALE` / `BARO1_WCF_FWD` | 50 / 0.15 | Starting values: the baro read about 4 m low at full throttle on the run-up, and about 2 m low at idle on the approach. |
-| `AUTOLAND_TD_OFS` | 20 | The firmware default, then learned. Without baro compensation (v16) it floated 36–48 m past the aim; 25 set by hand landed 14 m short to 23 m long. |
-| `AUTOLAND_DSC_ARC` | 90 | A level circuit gave a ~16° final and a fast touchdown. |
+| Fuselage vent | a hole cut in the fuselage | The closed fuselage pressurised with throttle (baro about 4 m low at full throttle). Vented, v16 landed close to perfectly; v17's software compensation read 3–4 m high and caused a crash. |
+| `AUTOLAND_TD_OFS` | 25 | With v16's diving final it touched down a few metres before the roll start. Re-check with the gentle final, which floats less. |
+| `AUTOLAND_DSC_ARC` / `FNL_HGT` | 180 / 8 | An even ~1.8 m/s descent from the start of the half turn off downwind (trees under the downwind leg), level for the last 60°, then a 1.5 m/s final. v16/v17's 90° arc started the final about 5 m high and dived at 4.5 m/s. |
+| `TECS_PITCH_MIN` | -12 | Backstop: limits any dive on the approach to about 3.3 m/s. |
+| `LAND_FLARE_SEC` | 2 | 1 s flared too late with the diving final. |
 | `AUTOLAND_RO_GAIN` | 3 | The tailwheel lost authority as it slowed. |
 | `TKOFF_TDRAG_ELEV` / `_SPD1` | 60 / 9 | Releasing the tail at 5 m/s lifted it early and lost steering. |
 | `STEER2SRV_P` / `_I` | 6 / 0 | A light tailwheel needed about twice the nominal gain. I wound up while taxiing. |

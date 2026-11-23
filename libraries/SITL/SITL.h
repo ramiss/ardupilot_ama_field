@@ -289,8 +289,6 @@ public:
         AP_Float wcof_yn;
         AP_Float wcof_zp;
         AP_Float wcof_zn;
-
-        AP_Float thst;   // Pa at full throttle
     };
     BaroParm baro[BARO_MAX_INSTANCES];
 

@@ -183,11 +183,44 @@ void Plane::takeoff_calc_roll(void)
 }
 
         
+#if MODE_AUTOLAND_ENABLED
+/*
+  AMA field mode (AUTOLAND_OPTIONS bits 1+2): the tail hold, the rotation and the
+  takeoff roll limit all wait for the airspeed to reach TKOFF_TDRAG_SPD1 /
+  TKOFF_ROTATE_SPD. Without an airspeed sensor that is the EKF's synthetic
+  estimate, which needs some flight to learn the wind and can read far too low
+  on the climb-out (test aircraft: 4.5-7 m/s at 11-13 m/s ground speed into a
+  headwind, up to 39 m). Once the aircraft is clearly airborne (1.5 m above the
+  baro height at the start of the takeoff, at 5 m/s or more over the ground),
+  count those speeds as reached: the tail hold releases for good, the rotation
+  starts and the roll limit opens with height, as stock does at those speeds.
+ */
+void Plane::takeoff_airborne_check(void)
+{
+    if (flight_stage != AP_FixedWing::FlightStage::TAKEOFF ||
+        !mode_autoland.runway_options_enabled() ||
+        !arming.is_armed_and_safety_off()) {
+        return;
+    }
+    const float spd = MAX(float(g.takeoff_rotate_speed), float(g.takeoff_tdrag_speed1));
+    if (auto_state.highest_airspeed >= spd) {
+        return;
+    }
+    if (barometer.get_altitude() - auto_state.baro_takeoff_alt >= 1.5f && gps.ground_speed() >= 5.0f) {
+        auto_state.highest_airspeed = spd;
+        gcs().send_text(MAV_SEVERITY_INFO, "Takeoff: airborne, tail hold released");
+    }
+}
+#endif
+
 /*
   calculate desired pitch angle during takeoff, setting nav_pitch_cd
  */
 void Plane::takeoff_calc_pitch(void)
 {
+#if MODE_AUTOLAND_ENABLED
+    takeoff_airborne_check();
+#endif
     // First see if TKOFF_ROTATE_SPD applies.
     // This will set the pitch for the first portion of the takeoff, up until cruise speed is reached.
     if (!auto_state.rotation_complete && g.takeoff_rotate_speed > 0) {
@@ -357,6 +390,9 @@ int8_t Plane::takeoff_tail_hold(void)
         // not in takeoff
         return 0;
     }
+#if MODE_AUTOLAND_ENABLED
+    takeoff_airborne_check();
+#endif
     if (g.takeoff_tdrag_elevator == 0) {
         // no takeoff elevator set
         goto return_zero;
