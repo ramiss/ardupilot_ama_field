@@ -39,7 +39,7 @@ satellite map.
 |---|---|---|
 | `AUTOLAND_WP_ALT` | Tallest obstacle near the circuit plus at least 5 m. This is the lowest the aircraft will be anywhere except the final approach. | 20 m (15 m trees) |
 | `AUTOLAND_WP_DIST` | Length of the final approach, measured back from the touchdown aim. Start at about **6–8 s at landing speed** (`TECS_LAND_ARSPD`, or about 1.2 × `AIRSPEED_MIN`). Make it longer for fast or slippery aircraft, and shorter if trees off the end of the runway force it. | 85 m at 15 m/s |
-| `AUTOLAND_SIDEGAP` | Gap between the extended centreline and the base circle. Use 5 m for a small, precise aircraft, and 10–15 m if the turn to final overshoots or the aircraft is fast. | 5 m |
+| `AUTOLAND_SIDEGAP` | Buffer between the runway centreline and the field mode's two circles, on the side away from the pits: the AUTOLAND base circle is this far out (the turn onto final ends there, so it can't overshoot toward the pits), and the runway circle for TAKEOFF, RTL (without a rally point) and the fence return is this + 10 m out (at least 15 m). Other loiters (LOITER mode, mission and GUIDED loiters) aren't affected. Use 5 m for a small, precise aircraft, and 10–15 m if the turn to final overshoots toward the pits or the aircraft is fast. Don't use 0: the turn then overshoots across the centreline toward the pits. | 5 m |
 | `TKOFF_ALT` | Height of the runway circle after takeoff. It must be well above `AUTOLAND_WP_ALT`. | 50 m |
 | `CRUISE_ALT_FLOOR` | Floor height for FBWB and CRUISE. It is usually the same as `AUTOLAND_WP_ALT`. | 20 m |
 | `FENCE_RADIUS` | Large enough that the whole circuit fits inside with margin (see 2.3), and small enough to keep a novice close. | 240 m |

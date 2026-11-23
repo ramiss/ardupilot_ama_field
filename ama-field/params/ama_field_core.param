@@ -12,7 +12,10 @@ AUTOLAND_OPTIONS,6
 AUTOLAND_WP_ALT,20
 # FIELD/AIRFRAME: length of the final, metres (~6-8 s at landing speed; 80-150 m typical)
 AUTOLAND_WP_DIST,100
-# FIELD: gap between the extended centreline and the base circle, metres
+# FIELD: buffer between the runway centreline and the field mode's two circles, away from
+# the pits, metres: the AUTOLAND base circle (the turn onto final ends this far out, so it
+# can't overshoot toward the pits) and, + 10 m, the runway circle for TAKEOFF, RTL and the
+# fence return. Other loiters (LOITER mode, mission/GUIDED loiters) aren't affected
 AUTOLAND_SIDEGAP,5
 # FIELD/AIRFRAME: start the even circle descent this many degrees before lined up on final:
 # 180 = as the turn from downwind begins (the base circle must be clear down to

@@ -331,7 +331,11 @@ gate and in-range rule, and the board-specific items.
 - The descent starts when the aircraft itself (not the read-ahead target) reaches
   `AUTOLAND_DSC_ARC`, so 180 works on a half-turn arrival from downwind. At that
   moment the read-ahead target is already part way down; the 3 s lag turns that
-  step into the same even sink from the start point. It starts from the height the
+  step into the same even sink from the start point. It only arms within 3 m of
+  circuit height: selected higher, the stock loiter-to-alt spirals down to circuit
+  height first (SITL from 100 m: about 2.9 m/s to 21 m, then the normal profile;
+  before this, the profile armed on the first pass and the aircraft spiralled straight
+  down to `AUTOLAND_FNL_HGT` and circled there). It starts from the height the
   aircraft is at, and reports a planned sink above 2.5 m/s.
 - It starts only with the aircraft within 15 m (or a quarter radius) of the circle
   and turning its way: joining it is often an S-turn, during which the degrees to go
@@ -404,7 +408,7 @@ example aircraft:
 | v15 | `AUTOLAND_DSC_ARC`. |
 | v16 | Integrator reset on TAKEOFF; `AUTOLAND_RO_GAIN`; one takeoff per arming. |
 | v17 (flown; crashed on the third landing) | Baro thrust compensation from the forward motor, with wind compensation, on every board; `AUTOLAND_BAROLRN` learns `BARO1_THST_SCALE` on each takeoff run-up; `AUTOLAND_TDLRN` learns `AUTOLAND_TD_OFS` from each AUTOLAND touchdown; rangefinder handling for any sensor on the AUTOLAND final (engagement by consistency with the descent at any sample rate, correction held below the minimum range, tiered touchdown detection including a blind zone, wheel-height reference); signal quality and `RFSS` for Benewake I2C (TF-Luna, if type 25 detects it); TOFSense-F polled at 50 Hz. First release built by CI, for every board in `boards.txt`. |
-| v18 (SITL-tested, not yet flown) | Removes v17's baro compensation and its learning (the vented fuselage needs none; on the unvented test aircraft the compensation read 3–4 m high on the approach and the third landing flew into the ground). The touchdown point is reported, no longer learned; `AUTOLAND_TD_OFS` default 25 m. Even circle descent from `AUTOLAND_DSC_ARC` to `AUTOLAND_FNL_HGT` (new, 8 m) with TECS lag compensation, level for the last 60°, another lap if high, and a gentle final from the circle exit: no step or dive at the start of the final (SITL: peak sink below 10 m 2.0–3.0 m/s, against 4.65). Final tracks the runway line with 0.6 × `NAVL1_PERIOD` (on the centreline sooner). TAKEOFF confirms the pits side (*"Takeoff: pits 57m left, circle on right"*). Tail hold, ground pitch and takeoff roll limit released 1.5 m up, not only at the estimated airspeed (SITL, thresholds out of reach: released 0.2 s after liftoff; stock held the ground pitch to 22 m). Keeps v17's rangefinder handling and TF-Luna support. FlyingRC F4Wing Mini: 878,784 bytes used, 104,256 free. |
+| v18 (SITL-tested, not yet flown) | Removes v17's baro compensation and its learning (the vented fuselage needs none; on the unvented test aircraft the compensation read 3–4 m high on the approach and the third landing flew into the ground). The touchdown point is reported, no longer learned; `AUTOLAND_TD_OFS` default 25 m. Even circle descent from `AUTOLAND_DSC_ARC` to `AUTOLAND_FNL_HGT` (new, 8 m) with TECS lag compensation, level for the last 60°, another lap if high, and a gentle final from the circle exit: no step or dive at the start of the final (SITL: peak sink below 10 m 2.0–3.0 m/s, against 4.65). Final tracks the runway line with 0.6 × `NAVL1_PERIOD` (on the centreline sooner). TAKEOFF confirms the pits side (*"Takeoff: pits 57m left, circle on right"*). Tail hold, ground pitch and takeoff roll limit released 1.5 m up, not only at the estimated airspeed (SITL, thresholds out of reach: released 0.2 s after liftoff; stock held the ground pitch to 22 m). Keeps v17's rangefinder handling and TF-Luna support. FlyingRC F4Wing Mini: 878,816 bytes used, 104,224 free. |
 
 v9 was a ground throttle mapping for spring-centred throttle sticks, and was not
 kept.

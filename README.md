@@ -9,7 +9,8 @@ one runway, with the pits and pilots' line along one side of it. The usual rule 
 such a field is that nothing flies on the pilot side of the runway. Stock ArduPlane
 modes don't know where the pits are. They will loiter, turn onto final or come home
 right over the pilot line. This firmware learns the field layout at power-up and
-takeoff, then keeps every automatic part of the flight on the far side of the runway.
+takeoff, then keeps the auto takeoff, its holding circle, RTL, the fence return and
+AUTOLAND on the far side of the runway.
 
 The goal is a setup that a new pilot can fly safely:
 
@@ -205,8 +206,9 @@ take off with TAKEOFF.
 1. **Level at the selected height.** The circuit height is the height when AUTOLAND
    is selected. It is limited to between `AUTOLAND_WP_ALT` (the minimum, for
    obstacles) and 0.25 × `AUTOLAND_WP_DIST` (the maximum, so the final isn't too
-   steep). Selected higher than that, it holds altitude to the circle and comes down
-   on it. Selected lower than `AUTOLAND_WP_ALT`, it climbs.
+   steep). Selected higher than that, it holds altitude to the base circle, spirals
+   down on it to circuit height (about 3 m/s with `TECS_PITCH_MIN` -12), and then
+   flies the normal descent below. Selected lower than `AUTOLAND_WP_ALT`, it climbs.
 2. **Base circle on the far side.** It is centred `AUTOLAND_WP_DIST` behind the
    touchdown aim, `AUTOLAND_SIDEGAP` from the extended centreline. The radius is
    sized for speed and wind, up to 60 m, so the turn onto final ends lined up rather
@@ -398,7 +400,7 @@ field settings are listed; everything else is stock ArduPlane.
 |---|---|---|
 | `AUTOLAND_WP_ALT` | Tallest obstacle near the circuit + 5 m. The circuit never goes lower before the final. | 20 m |
 | `AUTOLAND_WP_DIST` | Final length, about 6–8 s at landing speed. | 80–120 m |
-| `AUTOLAND_SIDEGAP` | Gap between the centreline and the base circle. | 5–15 m |
+| `AUTOLAND_SIDEGAP` | Buffer between the runway centreline and the field mode's two circles, on the side away from the pits. The AUTOLAND base circle stays this far out, so the turn onto final ends there and can't overshoot toward the pits. The runway circle (TAKEOFF loiter, RTL without a rally point, fence return) stays this + 10 m out, at least 15 m. Other loiters (LOITER mode, mission and GUIDED loiters) aren't affected. | 5 m |
 | `AUTOLAND_DSC_ARC` | Degrees before lined up where the descent starts. 180 = as the turn from downwind begins. Smaller = later and steeper; the base circle must be clear down to `AUTOLAND_FNL_HGT`. | 150–180 |
 | `AUTOLAND_FNL_HGT` | Height at the start of the final. Lower = a gentler final but lower over the ground before the aim point. | 8 m |
 | `CRUISE_ALT_FLOOR` | FBWB/CRUISE floor, usually = `AUTOLAND_WP_ALT`. | 20 m |
@@ -461,7 +463,7 @@ automatically.
 
 | Parameter | Default | Range | Typical | What it does |
 |---|---|---|---|---|
-| `AUTOLAND_SIDEGAP` | 0 | 0–100 m | 5–15 | Gap between the extended centreline and the near edge of the base circle. The runway circle uses this + 10 m. |
+| `AUTOLAND_SIDEGAP` | 0 | 0–100 m | 5 | Buffer between the runway centreline and the field mode's two circles, on the side away from the pits. The AUTOLAND base circle's near edge is this far out, so the turn onto final ends there and can't overshoot toward the pits; the final then tracks onto the centreline. The runway circle (TAKEOFF loiter, RTL without a rally point, fence return) is this + 10 m out (at least 15 m). Not landing-only; other loiters (LOITER mode, mission and GUIDED loiters) aren't affected. In SITL, 5 m kept the final within about 2 m of the centreline toward the pits; 0 let the turn overshoot 4–5 m toward them. |
 | `AUTOLAND_DSC_ARC` | 0 | 0–270° | 150–180 | Degrees before lined up at which the aircraft starts the circle descent (at least 90 with `AUTOLAND_FNL_HGT` set). 180 = as the turn from downwind begins. 0 = level until lined up. |
 | `AUTOLAND_FNL_HGT` | 8 m | 0–50 m | 6–10 | Height at the start of the final, reached 60° before the end of the turn and held level to the final. 0 = one continuous glide from the descent start over the rest of the turn and the final. |
 | `AUTOLAND_RO_GAIN` | 1.0 | 1–5 | 1–3 | Steering multiplier from touchdown until stopped. |

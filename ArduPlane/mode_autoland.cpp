@@ -75,8 +75,8 @@ const AP_Param::GroupInfo ModeAutoLand::var_info[] = {
     AP_GROUPINFO("CLIMB", 5, ModeAutoLand, terrain_alt_min, 0),
 
     // @Param: SIDEGAP
-    // @DisplayName: Gap between runway line and loiter-down circle
-    // @Description: Extra sideways distance between the extended runway centerline and the near edge of the AUTOLAND base circle. With AUTOLAND_OPTIONS bits 1+2 the TAKEOFF/RTL runway circle keeps this gap plus 10m. 0 keeps the base circle touching the centerline.
+    // @DisplayName: Buffer from the runway line to the circles
+    // @Description: Buffer between the extended runway centreline and the near edge of the field mode's circles, on the side away from the pits. The AUTOLAND base circle is this far out, so the turn onto final ends there and can't overshoot toward the pits; the final then tracks onto the centreline. With AUTOLAND_OPTIONS bits 1+2 the runway circle (TAKEOFF loiter, RTL without a rally point, fence return) is this plus 10m out (at least 15m). Other loiters (LOITER mode, mission and GUIDED loiters) are not affected. 0 puts the base circle on the centreline and lets the turn overshoot toward the pits; 5 is typical.
     // @Range: 0 100
     // @Increment: 1
     // @Units: m
@@ -452,6 +452,15 @@ bool ModeAutoLand::circle_descent_height(float &hgt)
         if (!turning || circle_err > MAX(15.0f, 0.25f * radius)) {
             return false;
         }
+        // selected above circuit height: the stock loiter spirals down to it on this
+        // circle first; the profile only starts from circuit height, so a high entry
+        // doesn't spiral straight down to AUTOLAND_FNL_HGT and circle there
+        float cur_abs, tgt_abs;
+        const bool have_hgt = plane.current_loc.get_alt_m(Location::AltFrame::ABSOLUTE, cur_abs) &&
+                              cmd_land.content.location.get_alt_m(Location::AltFrame::ABSOLUTE, tgt_abs);
+        if (have_hgt && cur_abs - tgt_abs > approach_hgt + 3.0f) {
+            return false;
+        }
         if (rem_deg >= dsc - 5.0f) {
             // before the descent start point: passing it starts the descent
             circle_dsc.armed = true;
@@ -466,12 +475,7 @@ bool ModeAutoLand::circle_descent_height(float &hgt)
         if (!circle_dsc.armed || rem_deg > circle_dsc.start_deg) {
             return false;
         }
-        float cur_abs, tgt_abs;
-        circle_dsc.start_hgt = approach_hgt;
-        if (plane.current_loc.get_alt_m(Location::AltFrame::ABSOLUTE, cur_abs) &&
-            cmd_land.content.location.get_alt_m(Location::AltFrame::ABSOLUTE, tgt_abs)) {
-            circle_dsc.start_hgt = constrain_float(cur_abs - tgt_abs, fnl, approach_hgt);
-        }
+        circle_dsc.start_hgt = have_hgt ? constrain_float(cur_abs - tgt_abs, fnl, approach_hgt) : approach_hgt;
         circle_dsc.started = true;
         circle_dsc.lowest = circle_dsc.start_hgt;
         const float secs = radius * radians(circle_dsc.start_deg - AUTOLAND_LEVEL_ARC_DEG) / gs;
